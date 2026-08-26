@@ -23,3 +23,15 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Hides the native up/down spinner arrows on <input type="number">,
+   which otherwise overlap the typed digits. Chrome/Safari/Edge and
+   Firefox handle this with two entirely different properties. */
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.no-spinner {
+  -moz-appearance: textfield;
+}
