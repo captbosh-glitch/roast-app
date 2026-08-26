@@ -48,18 +48,26 @@ export function AuthProvider({ children }) {
     // Phase 1: every new user auto-joins the one shared test group,
     // seeded in schema.sql, so the feed has real shared content before
     // the full Groups UI (join/create) exists.
-    const { data: group } = await supabase
+    const { data: group, error: groupError } = await supabase
       .from('groups')
       .select('id')
       .eq('invite_code', 'ROAST-BETA1')
       .single()
+
+    if (groupError) {
+      // Surface this clearly rather than silently inserting a NULL
+      // group_id -- that previously caused a user's own profile to
+      // become permanently invisible to themselves (NULL never equals
+      // NULL in a group_id-matching RLS policy).
+      return { error: { message: `Couldn't find the test group: ${groupError.message}` } }
+    }
 
     const defaultScreenName = email.split('@')[0]
 
     const { error: profileError } = await supabase.from('profiles').insert({
       id: data.user.id,
       screen_name: defaultScreenName,
-      group_id: group?.id ?? null,
+      group_id: group.id,
     })
 
     if (profileError) return { error: profileError }
