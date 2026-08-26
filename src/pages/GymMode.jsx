@@ -9,7 +9,7 @@ const COMMON_EXERCISES = [
   'Lat Pulldown', 'Incline Bench Press', 'Romanian Deadlift', 'Lunge',
 ]
 
-function NumberPicker({ label, value, onChange, min = 0 }) {
+function NumberPicker({ label, value, onChange, min = 0, editable = false }) {
   function handleTyped(e) {
     const raw = e.target.value
     if (raw === '') {
@@ -33,14 +33,18 @@ function NumberPicker({ label, value, onChange, min = 0 }) {
       >
         +
       </button>
-      <input
-        type="number"
-        inputMode="numeric"
-        value={value}
-        onChange={handleTyped}
-        className="font-display text-4xl mb-2 bg-transparent text-center w-20 outline-none focus:text-orange"
-        aria-label={`${label} value, tap to type a number directly`}
-      />
+      {editable ? (
+        <input
+          type="number"
+          inputMode="numeric"
+          value={value}
+          onChange={handleTyped}
+          className="no-spinner font-display text-4xl mb-2 bg-transparent text-center w-20 outline-none focus:text-orange"
+          aria-label={`${label} value, tap to type a number directly`}
+        />
+      ) : (
+        <span className="font-display text-4xl mb-2">{value}</span>
+      )}
       <button
         type="button"
         onClick={() => onChange(Math.max(min, value - 1))}
@@ -169,7 +173,7 @@ export default function GymMode() {
       <div className="flex justify-between border-y border-panel-border py-6 mb-6">
         <NumberPicker label="SETS" value={sets} onChange={setSets} min={1} />
         <NumberPicker label="REPS" value={reps} onChange={setReps} min={1} />
-        <NumberPicker label="LBS" value={weight} onChange={setWeight} min={0} />
+        <NumberPicker label="LBS" value={weight} onChange={setWeight} min={0} editable />
       </div>
 
       <button
