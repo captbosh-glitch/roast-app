@@ -24,10 +24,42 @@ function initials(name) {
 }
 
 export default function Feed() {
-  const { profile } = useAuth()
+  const { user, profile } = useAuth()
   const [posts, setPosts] = useState([])
   const [loading, setLoading] = useState(true)
   const [newSinceLoad, setNewSinceLoad] = useState(0)
+  // postId -> { count, likedByMe }
+  const [likes, setLikes] = useState({})
+  // postId -> count
+  const [commentCounts, setCommentCounts] = useState({})
+
+  async function loadEngagement(postIds) {
+    if (postIds.length === 0) return
+
+    const { data: likeRows } = await supabase
+      .from('feed_likes')
+      .select('post_id, user_id')
+      .in('post_id', postIds)
+
+    const likeMap = {}
+    for (const row of likeRows ?? []) {
+      if (!likeMap[row.post_id]) likeMap[row.post_id] = { count: 0, likedByMe: false }
+      likeMap[row.post_id].count += 1
+      if (row.user_id === user.id) likeMap[row.post_id].likedByMe = true
+    }
+    setLikes(likeMap)
+
+    const { data: commentRows } = await supabase
+      .from('feed_comments')
+      .select('post_id')
+      .in('post_id', postIds)
+
+    const commentMap = {}
+    for (const row of commentRows ?? []) {
+      commentMap[row.post_id] = (commentMap[row.post_id] ?? 0) + 1
+    }
+    setCommentCounts(commentMap)
+  }
 
   async function loadPosts() {
     const { data } = await supabase
@@ -36,8 +68,29 @@ export default function Feed() {
       .eq('group_id', profile.group_id)
       .order('created_at', { ascending: false })
       .limit(30)
-    setPosts(data ?? [])
+    const loaded = data ?? []
+    setPosts(loaded)
     setLoading(false)
+    loadEngagement(loaded.map((p) => p.id))
+  }
+
+  async function toggleRoast(postId, e) {
+    e.preventDefault() // don't navigate to the thread when tapping the roast button
+    const current = likes[postId] ?? { count: 0, likedByMe: false }
+
+    if (current.likedByMe) {
+      await supabase.from('feed_likes').delete().eq('post_id', postId).eq('user_id', user.id)
+      setLikes((prev) => ({
+        ...prev,
+        [postId]: { count: Math.max(0, current.count - 1), likedByMe: false },
+      }))
+    } else {
+      await supabase.from('feed_likes').insert({ post_id: postId, user_id: user.id })
+      setLikes((prev) => ({
+        ...prev,
+        [postId]: { count: current.count + 1, likedByMe: true },
+      }))
+    }
   }
 
   useEffect(() => {
@@ -103,34 +156,52 @@ export default function Feed() {
               className: 'text-muted border-panel-border',
             }
             const isLive = Date.now() - new Date(post.created_at).getTime() < 60000
+            const postLikes = likes[post.id] ?? { count: 0, likedByMe: false }
+            const postComments = commentCounts[post.id] ?? 0
 
             return (
-              <Link
-                key={post.id}
-                to={`/feed/${post.id}`}
-                className="block border-b border-panel-border py-5"
-              >
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-9 h-9 rounded-full bg-orange flex items-center justify-center text-xs font-bold flex-shrink-0 overflow-hidden">
-                    {post.profiles?.avatar_url ? (
-                      <img src={post.profiles.avatar_url} alt="" className="w-full h-full object-cover" />
-                    ) : (
-                      initials(post.profiles?.screen_name)
+              <div key={post.id} className="border-b border-panel-border py-5">
+                <Link to={`/feed/${post.id}`} className="block">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-9 h-9 rounded-full bg-orange flex items-center justify-center text-xs font-bold flex-shrink-0 overflow-hidden">
+                      {post.profiles?.avatar_url ? (
+                        <img src={post.profiles.avatar_url} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        initials(post.profiles?.screen_name)
+                      )}
+                    </div>
+                    <p className="font-body font-bold">{post.profiles?.screen_name ?? 'Unknown'}</p>
+                    <span className={`text-xs font-bold font-body border rounded px-2 py-0.5 ${badge.className}`}>
+                      {badge.label}
+                    </span>
+                    {isLive && (
+                      <span className="text-xs font-bold font-body border border-orange text-orange rounded px-2 py-0.5">
+                        LIVE
+                      </span>
                     )}
                   </div>
-                  <p className="font-body font-bold">{post.profiles?.screen_name ?? 'Unknown'}</p>
-                  <span className={`text-xs font-bold font-body border rounded px-2 py-0.5 ${badge.className}`}>
-                    {badge.label}
-                  </span>
-                  {isLive && (
-                    <span className="text-xs font-bold font-body border border-orange text-orange rounded px-2 py-0.5">
-                      LIVE
-                    </span>
-                  )}
+                  <p className="text-muted font-body text-xs mb-2">{timeAgo(post.created_at)}</p>
+                  <p className="font-body mb-3">{post.body}</p>
+                </Link>
+
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={(e) => toggleRoast(post.id, e)}
+                    className={`flex items-center gap-1.5 text-sm font-body font-semibold ${
+                      postLikes.likedByMe ? 'text-orange' : 'text-muted'
+                    }`}
+                    aria-label={postLikes.likedByMe ? 'Remove roast' : 'Roast this'}
+                  >
+                    🔥 {postLikes.count} Roast{postLikes.count === 1 ? '' : 's'}
+                  </button>
+                  <Link
+                    to={`/feed/${post.id}`}
+                    className="flex items-center gap-1.5 text-sm font-body font-semibold text-muted"
+                  >
+                    💬 {postComments}
+                  </Link>
                 </div>
-                <p className="text-muted font-body text-xs mb-2">{timeAgo(post.created_at)}</p>
-                <p className="font-body">{post.body}</p>
-              </Link>
+              </div>
             )
           })}
         </div>

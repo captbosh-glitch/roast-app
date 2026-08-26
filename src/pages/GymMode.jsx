@@ -10,6 +10,18 @@ const COMMON_EXERCISES = [
 ]
 
 function NumberPicker({ label, value, onChange, min = 0 }) {
+  function handleTyped(e) {
+    const raw = e.target.value
+    if (raw === '') {
+      onChange(min)
+      return
+    }
+    const parsed = parseInt(raw, 10)
+    if (!Number.isNaN(parsed)) {
+      onChange(Math.max(min, parsed))
+    }
+  }
+
   return (
     <div className="flex flex-col items-center flex-1">
       <p className="text-muted text-sm tracking-widest font-body font-semibold mb-3">{label}</p>
@@ -21,7 +33,14 @@ function NumberPicker({ label, value, onChange, min = 0 }) {
       >
         +
       </button>
-      <span className="font-display text-4xl mb-2">{value}</span>
+      <input
+        type="number"
+        inputMode="numeric"
+        value={value}
+        onChange={handleTyped}
+        className="font-display text-4xl mb-2 bg-transparent text-center w-20 outline-none focus:text-orange"
+        aria-label={`${label} value, tap to type a number directly`}
+      />
       <button
         type="button"
         onClick={() => onChange(Math.max(min, value - 1))}
