@@ -27,11 +27,34 @@ export default function Feed() {
   const { user, profile } = useAuth()
   const [posts, setPosts] = useState([])
   const [loading, setLoading] = useState(true)
-  const [newSinceLoad, setNewSinceLoad] = useState(0)
+  const [newSinceVisit, setNewSinceVisit] = useState(0)
   // postId -> { count, likedByMe }
   const [likes, setLikes] = useState({})
   // postId -> count
   const [commentCounts, setCommentCounts] = useState({})
+
+  // "New" means "posted since your last visit to this page" -- persisted
+  // per-device via localStorage, so it stays meaningful even if those
+  // posts loaded normally (not via a live real-time event) because you
+  // simply hadn't looked at the feed yet. Captured once per mount so it
+  // doesn't keep shifting forward as the session goes on. This must be
+  // React state, not a ref -- a ref update wouldn't reliably trigger the
+  // recompute effect below if posts happened to load first.
+  const [lastVisitThreshold, setLastVisitThreshold] = useState(null)
+
+  useEffect(() => {
+    if (!user) return
+    const storageKey = `roastapp_last_feed_view_${user.id}`
+    const previousVisit = localStorage.getItem(storageKey)
+    setLastVisitThreshold(previousVisit ? new Date(previousVisit) : new Date())
+    localStorage.setItem(storageKey, new Date().toISOString())
+  }, [user])
+
+  useEffect(() => {
+    if (!lastVisitThreshold) return
+    const count = posts.filter((p) => new Date(p.created_at) > lastVisitThreshold).length
+    setNewSinceVisit(count)
+  }, [posts, lastVisitThreshold])
 
   async function loadEngagement(postIds) {
     if (postIds.length === 0) return
@@ -99,7 +122,9 @@ export default function Feed() {
 
     // Real-time: new posts from anyone in the group appear instantly,
     // without needing to refresh -- this is what makes the "LIVE" badge
-    // on very-recent posts actually true, not just decorative.
+    // on very-recent posts actually true, not just decorative. It also
+    // naturally counts toward "New" above, since these posts' created_at
+    // will be after the visit threshold too.
     const channel = supabase
       .channel('feed_posts_live')
       .on(
@@ -112,7 +137,6 @@ export default function Feed() {
             .eq('id', payload.new.user_id)
             .single()
           setPosts((prev) => [{ ...payload.new, profiles: authorProfile }, ...prev])
-          setNewSinceLoad((n) => n + 1)
         }
       )
       .subscribe()
@@ -120,6 +144,8 @@ export default function Feed() {
     return () => supabase.removeChannel(channel)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.group_id])
+
+  const totalRoasts = Object.values(likes).reduce((sum, l) => sum + l.count, 0)
 
   return (
     <Layout>
@@ -130,13 +156,17 @@ export default function Feed() {
 
       <p className="font-display text-2xl text-orange mb-4">Feed Activity</p>
       <div className="flex gap-4 mb-6">
-        <div className="border border-orange/50 rounded-2xl px-6 py-4 text-center">
+        <div className="border border-orange/50 rounded-2xl px-6 py-4 text-center flex-1">
           <p className="font-display text-3xl text-bowling">{posts.length}</p>
           <p className="text-muted font-body text-sm">Posts</p>
         </div>
-        <div className="border border-orange/50 rounded-2xl px-6 py-4 text-center">
-          <p className="font-display text-3xl text-drink">{newSinceLoad}</p>
+        <div className="border border-orange/50 rounded-2xl px-6 py-4 text-center flex-1">
+          <p className="font-display text-3xl text-drink">{newSinceVisit}</p>
           <p className="text-muted font-body text-sm">New</p>
+        </div>
+        <div className="border border-orange/50 rounded-2xl px-6 py-4 text-center flex-1">
+          <p className="font-display text-3xl text-orange">{totalRoasts}</p>
+          <p className="text-muted font-body text-sm">Roasts</p>
         </div>
       </div>
 
