@@ -87,28 +87,32 @@ function isFrameComplete(frameIndex, frameRolls) {
 // Whether pins reset to a fresh 10 for the NEXT ball -- true at the
 // start of a frame, right after a strike, or after completing a spare
 // in the 10th frame's bonus ball.
-function pinsResetForNextBall(frameIndex, frameRolls) {
-  if (frameRolls.length === 0) return true
-  const last = frameRolls[frameRolls.length - 1]
-  if (last === 10) return true
-  if (frameIndex === 9 && frameRolls.length === 2) {
-    const sum = frameRolls[0] + frameRolls[1]
-    if (sum === 10) return true
-  }
-  return false
-}
-
 // Which specific pin numbers are still available to tap for the
 // CURRENT ball -- tracks actual pin identity (not just a count), so a
 // pin you already knocked down visibly disappears as an option on the
 // next ball, instead of remaining tappable.
+//
+// This walks the frame's roll history to find the most recent point
+// pins reset to a fresh 10 (start of frame, right after a strike, or a
+// completed spare in the 10th) and only counts pins knocked SINCE that
+// point -- not the whole frame's history. Getting this wrong was the
+// bug where a strike on the 10th frame's first ball incorrectly kept
+// blocking pins for the third ball, since ball 2 (which itself reset
+// the rack) was being unioned together with ball 1's original
+// all-10-gone record instead of treated as its own fresh start.
 function availablePins(frame) {
-  if (pinsResetForNextBall(frame.frameIndex, frame.rolls)) {
-    return new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+  const { rolls, pinSets, frameIndex } = frame
+  let resetFromIndex = 0
+  for (let i = 0; i < rolls.length; i++) {
+    if (rolls[i] === 10) {
+      resetFromIndex = i + 1
+    } else if (frameIndex === 9 && i > 0 && rolls[i - 1] !== 10 && rolls[i - 1] + rolls[i] === 10) {
+      resetFromIndex = i + 1
+    }
   }
   const knocked = new Set()
-  for (const pinSet of frame.pinSets) {
-    for (const p of pinSet) knocked.add(p)
+  for (let i = resetFromIndex; i < pinSets.length; i++) {
+    for (const p of pinSets[i]) knocked.add(p)
   }
   const available = new Set()
   for (let p = 1; p <= 10; p++) {
@@ -122,6 +126,10 @@ export default function BowlingMode() {
   const [gameSessionId, setGameSessionId] = useState(crypto.randomUUID())
   const [frames, setFrames] = useState([{ rolls: [], pinSets: [] }])
   const [selectedPins, setSelectedPins] = useState(new Set())
+  // Distinguishes "haven't made a choice yet" from "explicitly chose
+  // Gutter" -- both start out looking like an empty selection (size 0),
+  // but only one of them should actually enable LOG ROLL.
+  const [hasInteracted, setHasInteracted] = useState(false)
   const [drinkType, setDrinkType] = useState('Beer')
   const [tonightTotal, setTonightTotal] = useState(0)
   const [busy, setBusy] = useState(false)
@@ -153,6 +161,7 @@ export default function BowlingMode() {
 
   function togglePin(pinNumber) {
     if (!available.has(pinNumber) && !selectedPins.has(pinNumber)) return
+    setHasInteracted(true)
     setSelectedPins((prev) => {
       const next = new Set(prev)
       if (next.has(pinNumber)) {
@@ -165,6 +174,7 @@ export default function BowlingMode() {
   }
 
   function setQuickSelection(allAvailable) {
+    setHasInteracted(true)
     setSelectedPins(allAvailable ? new Set(available) : new Set())
   }
 
@@ -186,6 +196,7 @@ export default function BowlingMode() {
 
     setFrames(updatedFrames)
     setSelectedPins(new Set())
+    setHasInteracted(false)
   }
 
   // Manual, optional action for a roast-worthy moment (a strike, or a
@@ -274,9 +285,11 @@ export default function BowlingMode() {
     setGameSessionId(crypto.randomUUID())
     setFrames([{ rolls: [], pinSets: [] }])
     setSelectedPins(new Set())
+    setHasInteracted(false)
   }
 
-  const currentSelectionIsNotable = selectedPins.size === 10 || selectedPins.size === 0
+  const currentSelectionIsNotable =
+    hasInteracted && (selectedPins.size === 10 || selectedPins.size === 0)
 
   return (
     <Layout>
