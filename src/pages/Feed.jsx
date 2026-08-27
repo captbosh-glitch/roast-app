@@ -7,6 +7,8 @@ import Layout from '../components/Layout'
 const BADGE_STYLES = {
   GYM_FAIL: { label: 'GYM · FAIL', className: 'text-gym border-gym' },
   GYM_PR: { label: 'GYM · PR', className: 'text-green-400 border-green-500' },
+  DRINK_LOG: { label: 'DRINK · LOG', className: 'text-drink border-drink' },
+  DRINK_REGRET: { label: 'DRINK · REGRET', className: 'text-drink border-drink' },
 }
 
 function timeAgo(iso) {
