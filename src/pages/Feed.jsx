@@ -13,6 +13,8 @@ const BADGE_STYLES = {
   BOWL_SPARE: { label: 'BOWL · SPARE', className: 'text-bowling border-bowling' },
   BOWL_GUTTER: { label: 'BOWL · GUTTER', className: 'text-gym border-gym' },
   BOWL_GAME: { label: 'BOWL · GAME', className: 'text-bowling border-bowling' },
+  GOLF_GREAT: { label: 'GOLF · GREAT', className: 'text-golf border-golf' },
+  GOLF_FAIL: { label: 'GOLF · FAIL', className: 'text-golf border-golf' },
 }
 
 function timeAgo(iso) {
