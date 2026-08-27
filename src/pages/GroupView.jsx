@@ -8,7 +8,7 @@ const DEFAULT_INVITE_CODE = 'ROAST-BETA1'
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000
 
 export default function GroupView() {
-  const { user, profile, updateProfile } = useAuth()
+  const { user, profile, switchGroup } = useAuth()
   const [group, setGroup] = useState(null)
   const [members, setMembers] = useState([])
   const [activityCount, setActivityCount] = useState(0)
@@ -101,7 +101,7 @@ export default function GroupView() {
         .single()
       if (lookupError) throw lookupError
 
-      const { error } = await updateProfile({ group_id: defaultGroup.id })
+      const { error } = await switchGroup(defaultGroup.id)
       if (error) throw error
     } catch (err) {
       alert(`Couldn't leave group: ${err.message ?? err}`)
