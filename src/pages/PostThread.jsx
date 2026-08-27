@@ -90,7 +90,7 @@ export default function PostThread() {
     setGifError('')
     const timeout = setTimeout(async () => {
       try {
-        const url = `https://api.klipy.com/api/v1/${KLIPY_API_KEY}/gifs/search?query=${encodeURIComponent(gifQuery)}&customer_id=${user.id}&per_page=12`
+        const url = `https://api.klipy.com/api/v1/${KLIPY_API_KEY}/gifs/search?q=${encodeURIComponent(gifQuery)}&customer_id=${user.id}&per_page=12`
         const res = await fetch(url)
         if (!res.ok) throw new Error(`Klipy API returned ${res.status}`)
         const data = await res.json()
