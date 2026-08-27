@@ -8,6 +8,7 @@ import Profile from './pages/Profile'
 import ModeLauncher from './pages/ModeLauncher'
 import GymMode from './pages/GymMode'
 import DrinkingMode from './pages/DrinkingMode'
+import BowlingMode from './pages/BowlingMode'
 import Feed from './pages/Feed'
 import PostThread from './pages/PostThread'
 
@@ -23,10 +24,11 @@ export default function App() {
           <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
           <Route path="/mode/gym" element={<ProtectedRoute><GymMode /></ProtectedRoute>} />
           <Route path="/mode/drinking" element={<ProtectedRoute><DrinkingMode /></ProtectedRoute>} />
+          <Route path="/mode/bowling" element={<ProtectedRoute><BowlingMode /></ProtectedRoute>} />
           <Route path="/feed" element={<ProtectedRoute><Feed /></ProtectedRoute>} />
           <Route path="/feed/:postId" element={<ProtectedRoute><PostThread /></ProtectedRoute>} />
 
-          {/* Golf, Bowling modes and Groups screens are still upcoming */}
+          {/* Golf mode and Groups screens are still upcoming */}
         </Routes>
       </BrowserRouter>
     </AuthProvider>
