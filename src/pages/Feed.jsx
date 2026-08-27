@@ -9,6 +9,9 @@ const BADGE_STYLES = {
   GYM_PR: { label: 'GYM · PR', className: 'text-green-400 border-green-500' },
   DRINK_LOG: { label: 'DRINK · LOG', className: 'text-drink border-drink' },
   DRINK_REGRET: { label: 'DRINK · REGRET', className: 'text-drink border-drink' },
+  BOWL_STRIKE: { label: 'BOWL · STRIKE', className: 'text-bowling border-bowling' },
+  BOWL_SPARE: { label: 'BOWL · SPARE', className: 'text-bowling border-bowling' },
+  BOWL_GUTTER: { label: 'BOWL · GUTTER', className: 'text-gym border-gym' },
 }
 
 function timeAgo(iso) {
