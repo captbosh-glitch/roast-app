@@ -12,7 +12,8 @@ const PIN_ROWS = [
 
 // Standard flat-roll-array bowling scoring algorithm. Verified against
 // known reference games (perfect game = 300, gutter game = 0, all
-// 5-5 spares = 150, etc.) before this was ever wired into any UI.
+// 5-5 spares = 150, etc.) plus a full simulated 10-frame game before
+// this was ever wired into any UI.
 function calculateScore(rolls) {
   let score = 0
   let rollIndex = 0
@@ -40,44 +41,90 @@ function calculateScore(rolls) {
   return { score, frameSubtotals }
 }
 
+// Proper bowling notation: "X" only for a true first-ball strike, "/"
+// for a roll that completes a spare -- NOT just "any roll of value 10",
+// which was the bug (a gutter-then-10 was showing as "X" instead of
+// the correct "0 /").
+function frameNotation(frameIndex, frameRolls) {
+  if (frameRolls.length === 0) return '-'
+  if (frameIndex < 9) {
+    if (frameRolls[0] === 10) return 'X'
+    if (frameRolls.length === 2) {
+      if (frameRolls[0] + frameRolls[1] === 10) return `${frameRolls[0]} /`
+      return `${frameRolls[0]} ${frameRolls[1]}`
+    }
+    return `${frameRolls[0]}`
+  }
+  const symbols = []
+  for (let i = 0; i < frameRolls.length; i++) {
+    const r = frameRolls[i]
+    if (r === 10) {
+      symbols.push('X')
+    } else if (i > 0 && frameRolls[i - 1] !== 10 && frameRolls[i - 1] + r === 10) {
+      symbols.push('/')
+    } else {
+      symbols.push(`${r}`)
+    }
+  }
+  return symbols.join(' ')
+}
+
 function isTenthFrameComplete(frameRolls) {
   if (frameRolls.length === 3) return true
   if (frameRolls.length === 2) {
     const sum = frameRolls[0] + frameRolls[1]
-    return sum < 10 // open frame in the 10th -- no bonus ball
+    return sum < 10
   }
   return false
 }
 
 function isFrameComplete(frameIndex, frameRolls) {
   if (frameIndex === 9) return isTenthFrameComplete(frameRolls)
-  if (frameRolls[0] === 10) return true // strike
+  if (frameRolls[0] === 10) return true
   return frameRolls.length === 2
 }
 
-function maxPinsForCurrentBall(frameIndex, frameRolls) {
-  // Pins reset to a fresh 10 at the start of a frame, after a strike, or
-  // for a 10th-frame bonus ball following a spare -- otherwise capped by
-  // whatever's left standing from the first ball.
-  if (frameRolls.length === 0) return 10
-  if (frameIndex === 9) {
-    if (frameRolls.length === 1 && frameRolls[0] === 10) return 10 // struck, bonus ball 2 resets
-    if (frameRolls.length === 2) {
-      const sum = frameRolls[0] + frameRolls[1]
-      if (sum >= 10) return 10 // spare or two strikes -- bonus ball resets
-    }
+// Whether pins reset to a fresh 10 for the NEXT ball -- true at the
+// start of a frame, right after a strike, or after completing a spare
+// in the 10th frame's bonus ball.
+function pinsResetForNextBall(frameIndex, frameRolls) {
+  if (frameRolls.length === 0) return true
+  const last = frameRolls[frameRolls.length - 1]
+  if (last === 10) return true
+  if (frameIndex === 9 && frameRolls.length === 2) {
+    const sum = frameRolls[0] + frameRolls[1]
+    if (sum === 10) return true
   }
-  return 10 - frameRolls[frameRolls.length - 1]
+  return false
+}
+
+// Which specific pin numbers are still available to tap for the
+// CURRENT ball -- tracks actual pin identity (not just a count), so a
+// pin you already knocked down visibly disappears as an option on the
+// next ball, instead of remaining tappable.
+function availablePins(frame) {
+  if (pinsResetForNextBall(frame.frameIndex, frame.rolls)) {
+    return new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+  }
+  const knocked = new Set()
+  for (const pinSet of frame.pinSets) {
+    for (const p of pinSet) knocked.add(p)
+  }
+  const available = new Set()
+  for (let p = 1; p <= 10; p++) {
+    if (!knocked.has(p)) available.add(p)
+  }
+  return available
 }
 
 export default function BowlingMode() {
   const { user, profile } = useAuth()
   const [gameSessionId, setGameSessionId] = useState(crypto.randomUUID())
-  const [frames, setFrames] = useState([{ rolls: [] }])
+  const [frames, setFrames] = useState([{ rolls: [], pinSets: [] }])
   const [selectedPins, setSelectedPins] = useState(new Set())
   const [drinkType, setDrinkType] = useState('Beer')
-  const [drinksTonight, setDrinksTonight] = useState(0)
-  const [logging, setLogging] = useState(false)
+  const [tonightTotal, setTonightTotal] = useState(0)
+  const [busy, setBusy] = useState(false)
 
   const currentFrameIndex = frames.length - 1
   const currentFrame = frames[currentFrameIndex]
@@ -86,96 +133,150 @@ export default function BowlingMode() {
   const flatRolls = frames.flatMap((f) => f.rolls)
   const { score, frameSubtotals } = calculateScore(flatRolls)
 
-  const maxPins = maxPinsForCurrentBall(currentFrameIndex, currentFrame.rolls)
+  const available = availablePins({ ...currentFrame, frameIndex: currentFrameIndex })
   const ballLabel = currentFrame.rolls.length + 1
 
+  async function loadTonightDrinks() {
+    const since = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString()
+    const { data } = await supabase
+      .from('drink_logs')
+      .select('quantity')
+      .eq('user_id', user.id)
+      .gte('created_at', since)
+    setTonightTotal((data ?? []).reduce((sum, r) => sum + r.quantity, 0))
+  }
+
+  useEffect(() => {
+    if (user) loadTonightDrinks()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user])
+
   function togglePin(pinNumber) {
+    if (!available.has(pinNumber) && !selectedPins.has(pinNumber)) return
     setSelectedPins((prev) => {
       const next = new Set(prev)
       if (next.has(pinNumber)) {
         next.delete(pinNumber)
-      } else if (next.size < maxPins) {
+      } else if (next.size < available.size) {
         next.add(pinNumber)
       }
       return next
     })
   }
 
-  function setQuickPins(count) {
-    const next = new Set()
-    for (let i = 1; i <= count; i++) next.add(i)
-    setSelectedPins(next)
+  function setQuickSelection(allAvailable) {
+    setSelectedPins(allAvailable ? new Set(available) : new Set())
   }
 
-  async function postFrameToFeed(frameIndex, frameRolls) {
-    const name = profile?.screen_name ?? 'Someone'
-    let body = null
-    let activityType = null
+  // Pure local navigation -- pushes the current ball's selection into
+  // frame state and advances to the next ball/frame. Never touches the
+  // database or the feed, so routine frames don't spam anyone.
+  function handleAdvance() {
+    const pinsKnocked = selectedPins.size
+    const updatedRolls = [...currentFrame.rolls, pinsKnocked]
+    const updatedPinSets = [...currentFrame.pinSets, new Set(selectedPins)]
+    const nowComplete = isFrameComplete(currentFrameIndex, updatedRolls)
 
-    if (frameRolls[0] === 10) {
-      body = `${name} just threw a STRIKE in frame ${frameIndex + 1}! 🎳✨`
-      activityType = 'BOWL_STRIKE'
-    } else if (frameRolls.every((r) => r === 0)) {
-      body = `${name} rolled a gutter ball in frame ${frameIndex + 1}. Zero pins, zero shame... okay, some shame.`
-      activityType = 'BOWL_GUTTER'
-    } else if (frameRolls.length >= 2 && frameRolls[0] + frameRolls[1] === 10) {
-      body = `${name} picked up a spare in frame ${frameIndex + 1}. Clean.`
-      activityType = 'BOWL_SPARE'
+    const updatedFrames = [...frames]
+    updatedFrames[currentFrameIndex] = { rolls: updatedRolls, pinSets: updatedPinSets }
+
+    if (nowComplete && currentFrameIndex < 9) {
+      updatedFrames.push({ rolls: [], pinSets: [] })
     }
 
-    if (body) {
-      await supabase.from('feed_posts').insert({
+    setFrames(updatedFrames)
+    setSelectedPins(new Set())
+  }
+
+  // Manual, optional action for a roast-worthy moment (a strike, or a
+  // total gutter ball) -- posts to the feed right now, independent of
+  // whether/when the player advances the game. Doesn't touch frame state.
+  async function handleLogRoll() {
+    const pinsKnocked = selectedPins.size
+    const isNotable = pinsKnocked === 10 || pinsKnocked === 0
+    if (!isNotable) return
+
+    setBusy(true)
+    try {
+      const name = profile?.screen_name ?? 'Someone'
+      const body =
+        pinsKnocked === 10
+          ? `${name} just threw a STRIKE in frame ${currentFrameIndex + 1}! 🎳✨`
+          : `${name} rolled a gutter ball in frame ${currentFrameIndex + 1}. Zero pins, zero shame... okay, some shame.`
+
+      const { error } = await supabase.from('feed_posts').insert({
         user_id: user.id,
         group_id: profile.group_id,
-        activity_type: activityType,
+        activity_type: pinsKnocked === 10 ? 'BOWL_STRIKE' : 'BOWL_GUTTER',
         body,
       })
+      if (error) throw error
+    } catch (err) {
+      alert(`Couldn't post: ${err.message ?? err}`)
+    } finally {
+      setBusy(false)
     }
   }
 
-  async function handleLogRoll() {
-    setLogging(true)
+  // Posts once, at the end of a full game, with the final score --
+  // instead of the feed filling up with every individual frame.
+  async function handleLogGame() {
+    setBusy(true)
     try {
-      const pinsKnocked = selectedPins.size
-      const updatedRolls = [...currentFrame.rolls, pinsKnocked]
-      const nowComplete = isFrameComplete(currentFrameIndex, updatedRolls)
+      const name = profile?.screen_name ?? 'Someone'
+      const strikeCount = frames.filter((f) => f.rolls[0] === 10).length
 
-      const updatedFrames = [...frames]
-      updatedFrames[currentFrameIndex] = { rolls: updatedRolls }
-      setFrames(updatedFrames)
-      setSelectedPins(new Set())
-
-      if (nowComplete) {
-        const allFlatRolls = updatedFrames.flatMap((f) => f.rolls)
-        const { score: runningScore } = calculateScore(allFlatRolls)
-
-        const { error } = await supabase.from('bowling_frames').insert({
+      const { error: frameError } = await supabase.from('bowling_frames').insert(
+        frames.map((f, i) => ({
           user_id: user.id,
           game_session_id: gameSessionId,
-          frame_number: currentFrameIndex + 1,
-          rolls: updatedRolls,
-          running_score: runningScore,
-        })
-        if (error) throw error
+          frame_number: i + 1,
+          rolls: f.rolls,
+          running_score: frameSubtotals[i] ?? score,
+        }))
+      )
+      if (frameError) throw frameError
 
-        await postFrameToFeed(currentFrameIndex, updatedRolls)
+      const { error: postError } = await supabase.from('feed_posts').insert({
+        user_id: user.id,
+        group_id: profile.group_id,
+        activity_type: 'BOWL_GAME',
+        body: `${name} finished a game with a score of ${score}${strikeCount > 0 ? ` (${strikeCount} strike${strikeCount === 1 ? '' : 's'})` : ''}.`,
+      })
+      if (postError) throw postError
 
-        if (currentFrameIndex < 9) {
-          setFrames([...updatedFrames, { rolls: [] }])
-        }
-      }
+      handleNewGame()
     } catch (err) {
-      alert(`Couldn't log roll: ${err.message ?? err}`)
+      alert(`Couldn't log game: ${err.message ?? err}`)
     } finally {
-      setLogging(false)
+      setBusy(false)
+    }
+  }
+
+  async function handleLogDrink() {
+    setBusy(true)
+    try {
+      const { error } = await supabase.from('drink_logs').insert({
+        user_id: user.id,
+        drink_type: drinkType,
+        quantity: 1,
+      })
+      if (error) throw error
+      await loadTonightDrinks()
+    } catch (err) {
+      alert(`Couldn't log drink: ${err.message ?? err}`)
+    } finally {
+      setBusy(false)
     }
   }
 
   function handleNewGame() {
     setGameSessionId(crypto.randomUUID())
-    setFrames([{ rolls: [] }])
+    setFrames([{ rolls: [], pinSets: [] }])
     setSelectedPins(new Set())
   }
+
+  const currentSelectionIsNotable = selectedPins.size === 10 || selectedPins.size === 0
 
   return (
     <Layout>
@@ -185,11 +286,9 @@ export default function BowlingMode() {
       <h1 className="font-display text-4xl text-bowling mb-6">Throw your Rock!</h1>
 
       <div className="flex items-center justify-between bg-panel border border-panel-border rounded-2xl px-5 py-4 mb-4">
-        <div>
-          <p className="font-display text-xl text-bowling">
-            {gameOver ? 'Game Over' : `Frame ${currentFrameIndex + 1} · Ball ${ballLabel}`}
-          </p>
-        </div>
+        <p className="font-display text-xl text-bowling">
+          {gameOver ? 'Game Over' : `Frame ${currentFrameIndex + 1} · Ball ${ballLabel}`}
+        </p>
         <div className="text-right">
           <p className="text-muted font-body text-xs tracking-widest">SCORE</p>
           <p className="font-display text-3xl">{score}</p>
@@ -199,18 +298,16 @@ export default function BowlingMode() {
       <div className="grid grid-cols-10 gap-1 mb-6">
         {Array.from({ length: 10 }).map((_, i) => {
           const frame = frames[i]
-          const notation = frame?.rolls.map((r) => (r === 10 ? 'X' : r)).join(' ') ?? ''
+          const notation = frame ? frameNotation(i, frame.rolls) : '-'
           return (
             <div
               key={i}
               className={`text-center border rounded-lg py-2 ${
-                i === currentFrameIndex && !gameOver
-                  ? 'border-bowling'
-                  : 'border-panel-border'
+                i === currentFrameIndex && !gameOver ? 'border-bowling' : 'border-panel-border'
               }`}
             >
               <p className="text-muted font-body text-[10px]">{i + 1}</p>
-              <p className="font-body text-xs font-bold">{notation || '-'}</p>
+              <p className="font-body text-xs font-bold">{notation}</p>
               <p className="text-bowling font-body text-[10px]">{frameSubtotals[i] ?? ''}</p>
             </div>
           )
@@ -219,17 +316,15 @@ export default function BowlingMode() {
 
       {gameOver ? (
         <button
-          onClick={handleNewGame}
-          className="w-full bg-bowling text-black font-display text-lg py-4 rounded-2xl mb-6"
+          onClick={handleLogGame}
+          disabled={busy}
+          className="w-full bg-bowling text-black font-display text-lg py-4 rounded-2xl mb-6 disabled:opacity-60"
         >
-          🎳 START NEW GAME
+          {busy ? 'LOGGING...' : `🎳 LOG GAME (Score: ${score})`}
         </button>
       ) : (
         <>
-          <button
-            onClick={handleNewGame}
-            className="text-muted font-body text-sm underline mb-4"
-          >
+          <button onClick={handleNewGame} className="text-muted font-body text-sm underline mb-4">
             ↩ Reset game
           </button>
 
@@ -240,47 +335,66 @@ export default function BowlingMode() {
           <div className="flex flex-col items-center gap-2 mb-4">
             {PIN_ROWS.map((row, i) => (
               <div key={i} className="flex gap-3">
-                {row.map((pin) => (
-                  <button
-                    key={pin}
-                    onClick={() => togglePin(pin)}
-                    disabled={!selectedPins.has(pin) && selectedPins.size >= maxPins}
-                    className={`w-12 h-12 rounded-full flex items-center justify-center font-body font-bold border-2 ${
-                      selectedPins.has(pin)
-                        ? 'bg-bowling border-bowling text-black'
-                        : 'bg-panel border-panel-border text-white disabled:opacity-30'
-                    }`}
-                  >
-                    {pin}
-                  </button>
-                ))}
+                {row.map((pin) => {
+                  const isAvailable = available.has(pin)
+                  const isSelected = selectedPins.has(pin)
+                  return (
+                    <button
+                      key={pin}
+                      onClick={() => togglePin(pin)}
+                      disabled={!isAvailable && !isSelected}
+                      className={`w-12 h-12 rounded-full flex items-center justify-center font-body font-bold border-2 transition-opacity ${
+                        isSelected
+                          ? 'bg-bowling border-bowling text-black'
+                          : isAvailable
+                          ? 'bg-panel border-panel-border text-white'
+                          : 'bg-panel border-panel-border text-muted opacity-20'
+                      }`}
+                    >
+                      {pin}
+                    </button>
+                  )
+                })}
               </div>
             ))}
           </div>
 
           <div className="flex gap-2 mb-6">
             <button
-              onClick={() => setQuickPins(maxPins)}
-              disabled={currentFrame.rolls.length > 0 && maxPins !== 10}
-              className="flex-1 border border-bowling text-bowling rounded-xl py-2 font-body font-semibold text-sm disabled:opacity-30"
+              onClick={() => setQuickSelection(true)}
+              className="flex-1 border border-bowling text-bowling rounded-xl py-2 font-body font-semibold text-sm"
             >
-              Strike ✨
+              All pins ✨
             </button>
             <button
-              onClick={() => setQuickPins(0)}
+              onClick={() => setQuickSelection(false)}
               className="flex-1 border border-red-600 text-red-400 rounded-xl py-2 font-body font-semibold text-sm"
             >
               Gutter 😬
             </button>
           </div>
 
-          <button
-            onClick={handleLogRoll}
-            disabled={logging}
-            className="w-full bg-bowling text-black font-display text-lg py-4 rounded-2xl mb-6 disabled:opacity-60"
-          >
-            {logging ? 'LOGGING...' : 'LOG ROLL'}
-          </button>
+          <div className="flex gap-3 mb-6">
+            <button
+              onClick={handleLogRoll}
+              disabled={busy || !currentSelectionIsNotable}
+              className="flex-1 border-2 border-orange text-orange font-display text-base py-3 rounded-2xl disabled:opacity-30"
+            >
+              🔥 LOG ROLL
+            </button>
+            <button
+              onClick={handleAdvance}
+              className="flex-1 bg-bowling text-black font-display text-base py-3 rounded-2xl"
+            >
+              {isFrameComplete(currentFrameIndex, [...currentFrame.rolls, selectedPins.size])
+                ? 'NEXT FRAME →'
+                : 'NEXT BALL →'}
+            </button>
+          </div>
+          <p className="text-muted font-body text-xs text-center -mt-4 mb-6">
+            LOG ROLL posts a strike/gutter to the feed without advancing.
+            NEXT FRAME/BALL advances the game without posting anything.
+          </p>
         </>
       )}
 
@@ -304,23 +418,15 @@ export default function BowlingMode() {
       <div className="flex items-center justify-between bg-panel border border-panel-border rounded-2xl px-5 py-4">
         <div>
           <p className="font-body font-semibold">Drinks tonight</p>
-          <p className="text-muted font-body text-sm">{drinkType} · 1 unit each</p>
+          <p className="text-muted font-body text-sm">{tonightTotal} logged in the last 6 hours</p>
         </div>
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => setDrinksTonight((d) => Math.max(0, d - 1))}
-            className="w-9 h-9 rounded-full bg-black/30 text-white text-lg"
-          >
-            −
-          </button>
-          <span className="font-display text-3xl text-drink w-8 text-center">{drinksTonight}</span>
-          <button
-            onClick={() => setDrinksTonight((d) => d + 1)}
-            className="w-9 h-9 rounded-full bg-black/30 text-white text-lg"
-          >
-            +
-          </button>
-        </div>
+        <button
+          onClick={handleLogDrink}
+          disabled={busy}
+          className="bg-drink text-white font-body font-semibold text-sm px-4 py-2 rounded-xl disabled:opacity-60"
+        >
+          + Log {drinkType}
+        </button>
       </div>
     </Layout>
   )
