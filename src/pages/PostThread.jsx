@@ -93,6 +93,10 @@ export default function PostThread() {
         const res = await fetch(url)
         if (!res.ok) throw new Error(`Klipy API returned ${res.status}`)
         const data = await res.json()
+        // TEMP DEBUG -- remove once the correct Klipy response shape is
+        // confirmed. Check the browser Console tab after searching.
+        console.log('KLIPY REQUEST URL:', url)
+        console.log('KLIPY RAW RESPONSE:', JSON.stringify(data, null, 2))
         // NOTE: response shape here is a best-effort guess based on
         // available documentation -- if this breaks, check the actual
         // response shape in your browser's Network tab against a live
