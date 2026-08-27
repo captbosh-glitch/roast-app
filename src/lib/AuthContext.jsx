@@ -92,7 +92,18 @@ export function AuthProvider({ children }) {
     return { error }
   }
 
-  const value = { user, profile, loading, signUp, signIn, signOut, updateProfile }
+  // Switching groups goes through a dedicated database function rather
+  // than a plain profiles update -- a direct update to group_id hit an
+  // RLS timing issue (the SELECT policy governing your own row depends
+  // on group_id, creating a chicken-and-egg check during the same
+  // operation). This sidesteps that entirely.
+  async function switchGroup(newGroupId) {
+    const { error } = await supabase.rpc('switch_my_group', { new_group_id: newGroupId })
+    if (!error) await loadProfile(user.id)
+    return { error }
+  }
+
+  const value = { user, profile, loading, signUp, signIn, signOut, updateProfile, switchGroup }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
