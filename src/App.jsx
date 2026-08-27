@@ -10,6 +10,8 @@ import GymMode from './pages/GymMode'
 import DrinkingMode from './pages/DrinkingMode'
 import BowlingMode from './pages/BowlingMode'
 import GolfMode from './pages/GolfMode'
+import GroupView from './pages/GroupView'
+import JoinCreateGroup from './pages/JoinCreateGroup'
 import Feed from './pages/Feed'
 import PostThread from './pages/PostThread'
 
@@ -27,10 +29,10 @@ export default function App() {
           <Route path="/mode/drinking" element={<ProtectedRoute><DrinkingMode /></ProtectedRoute>} />
           <Route path="/mode/bowling" element={<ProtectedRoute><BowlingMode /></ProtectedRoute>} />
           <Route path="/mode/golf" element={<ProtectedRoute><GolfMode /></ProtectedRoute>} />
+          <Route path="/group" element={<ProtectedRoute><GroupView /></ProtectedRoute>} />
+          <Route path="/group/join" element={<ProtectedRoute><JoinCreateGroup /></ProtectedRoute>} />
           <Route path="/feed" element={<ProtectedRoute><Feed /></ProtectedRoute>} />
           <Route path="/feed/:postId" element={<ProtectedRoute><PostThread /></ProtectedRoute>} />
-
-          {/* Groups screens are the last piece remaining */}
         </Routes>
       </BrowserRouter>
     </AuthProvider>
