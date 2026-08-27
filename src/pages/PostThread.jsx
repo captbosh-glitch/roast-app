@@ -36,7 +36,6 @@ export default function PostThread() {
   const [gifLoading, setGifLoading] = useState(false)
   const [gifError, setGifError] = useState('')
   const [selectedGifUrl, setSelectedGifUrl] = useState(null)
-  const [debugInfo, setDebugInfo] = useState(null)
 
   async function load() {
     const { data: postData } = await supabase
@@ -94,13 +93,8 @@ export default function PostThread() {
         const res = await fetch(url)
         if (!res.ok) throw new Error(`Klipy API returned ${res.status}`)
         const data = await res.json()
-        // TEMP DEBUG -- remove once the correct Klipy response shape is
-        // confirmed. Shown directly on the page, no dev tools needed.
-        setDebugInfo({ url, response: data })
-        // NOTE: response shape here is a best-effort guess based on
-        // available documentation -- if this breaks, check the actual
-        // response shape in your browser's Network tab against a live
-        // Klipy account and adjust the mapping below.
+        // Confirmed against a real live response: results are at
+        // data.data.data[], each with file.<size>.gif.url for the image.
         const items = data?.data?.data ?? data?.data ?? []
         setGifResults(items)
       } catch (err) {
@@ -267,33 +261,12 @@ export default function PostThread() {
             />
             {gifLoading && <p className="text-muted font-body text-sm">Searching...</p>}
             {gifError && <p className="text-red-400 font-body text-sm">{gifError}</p>}
-            {debugInfo && (
-              <div className="mt-3 bg-black/40 rounded-xl p-3">
-                <p className="text-muted font-body text-xs mb-1">DEBUG -- Request URL:</p>
-                <textarea
-                  readOnly
-                  value={debugInfo.url}
-                  className="w-full bg-black/40 text-orange font-body text-xs p-2 rounded mb-2"
-                  rows={3}
-                  onClick={(e) => e.target.select()}
-                />
-                <p className="text-muted font-body text-xs mb-1">DEBUG -- Raw response:</p>
-                <textarea
-                  readOnly
-                  value={JSON.stringify(debugInfo.response, null, 2)}
-                  className="w-full bg-black/40 text-green-400 font-body text-xs p-2 rounded"
-                  rows={10}
-                  onClick={(e) => e.target.select()}
-                />
-              </div>
-            )}
             {!gifLoading && !gifError && gifResults.length > 0 && (
               <div className="grid grid-cols-3 gap-2">
                 {gifResults.map((gif, i) => {
-                  // Best-effort field mapping -- adjust to match Klipy's
-                  // actual response shape if this doesn't render correctly.
-                  const thumbUrl =
-                    gif?.file?.sm?.gif?.url ?? gif?.url ?? gif?.images?.preview_gif?.url
+                  // Confirmed against a real response: file.sm.gif.url
+                  // is the correct thumbnail path.
+                  const thumbUrl = gif?.file?.sm?.gif?.url
                   if (!thumbUrl) return null
                   return (
                     <button
