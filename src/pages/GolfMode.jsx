@@ -140,6 +140,8 @@ export default function GolfMode() {
       </p>
       <h1 className="font-display text-4xl text-golf mb-6">FORE!</h1>
 
+<Link to="/mode/golf/caddie" className="block text-center border-2 border-golf text-golf font-display text-lg py-3 rounded-2xl mb-6">⛳ Open GPS Caddie</Link>
+
       <p className="text-golf font-display text-lg mb-2">Course</p>
       <input
         value={courseName}
