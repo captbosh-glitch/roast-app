@@ -452,11 +452,14 @@ function RoastPopup({ roast, onClose }) {
   }, [])
 
   const CATEGORY_STYLES = {
-    parOrBetter: { border: 'border-green-500', text: 'text-green-400', label: 'NICE.' },
+    eagle: { border: 'border-green-400', text: 'text-green-300', label: 'EAGLE?!' },
+    birdie: { border: 'border-green-500', text: 'text-green-400', label: 'BIRDIE.' },
+    par: { border: 'border-golf', text: 'text-golf', label: 'PAR.' },
     bogey: { border: 'border-yellow-500', text: 'text-yellow-400', label: 'BOGEY.' },
-    doubleBogeyOrWorse: { border: 'border-red-500', text: 'text-red-400', label: 'ROUGH.' },
-    waterHazard: { border: 'border-blue-500', text: 'text-blue-400', label: 'SPLASH.' },
-    sandTrap: { border: 'border-yellow-500', text: 'text-yellow-400', label: 'BEACH DAY.' },
+    doubleBogey: { border: 'border-orange-500', text: 'text-orange-400', label: 'DOUBLE.' },
+    tripleOrWorse: { border: 'border-red-500', text: 'text-red-400', label: 'ROUGH.' },
+    water: { border: 'border-blue-500', text: 'text-blue-400', label: 'SPLASH.' },
+    sand: { border: 'border-yellow-500', text: 'text-yellow-400', label: 'BEACH DAY.' },
     threePutt: { border: 'border-orange-500', text: 'text-orange-400', label: 'YIKES.' },
   }
   const style = CATEGORY_STYLES[roast.category] ?? CATEGORY_STYLES.bogey
