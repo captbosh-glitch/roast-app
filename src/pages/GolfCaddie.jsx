@@ -3,7 +3,8 @@ import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import { useGolfGPS, getDistanceInYards } from '../lib/golfGps'
 import { PEBBLE_CREEK } from '../lib/pebbleCreekCourse'
-import { getRoastForHole, getRoundRoastSummary } from '../lib/roastDatabase'
+import { getRoastForHole } from '../lib/roastDatabase'
+import { generatePostRoundReport } from '../lib/postRoundSummary'
 import Layout from '../components/Layout'
 
 function emptyScorecard() {
@@ -126,15 +127,15 @@ export default function GolfCaddie() {
     setShowPostRoundReport(false)
   }
 
-  async function postRoundSummaryToFeed(summaryText) {
+  async function postRoundSummaryToFeed(report) {
     setSaving(true)
     try {
       const name = profile?.screen_name ?? 'Someone'
       const { error } = await supabase.from('feed_posts').insert({
         user_id: user.id,
         group_id: profile.group_id,
-        activity_type: overallStrokes - overallPar <= 0 ? 'GOLF_GREAT' : 'GOLF_FAIL',
-        body: `${name}'s round at ${PEBBLE_CREEK.name}: ${summaryText}`,
+        activity_type: report.scoreRelativeToPar <= 0 ? 'GOLF_GREAT' : 'GOLF_FAIL',
+        body: `${name}'s round at ${PEBBLE_CREEK.name} -- "${report.badgeTitle}": ${report.headlineRoast} ${report.detailedRoast}`,
       })
       if (error) throw error
       alert('Posted to the group feed!')
@@ -179,6 +180,24 @@ export default function GolfCaddie() {
   const overallWater = frontTotals.water + backTotals.water
   const overallSand = frontTotals.sand + backTotals.sand
   const holesLogged = PEBBLE_CREEK.holes.filter((h) => scorecard[h.number]?.logged).length
+
+  // Build the array the report generator expects, from whichever holes
+  // have actually been logged so far.
+  const loggedHolesData = PEBBLE_CREEK.holes
+    .filter((h) => scorecard[h.number]?.logged)
+    .map((h) => {
+      const entry = scorecard[h.number]
+      return {
+        par: h.par,
+        strokes: entry.strokes,
+        putts: entry.putts,
+        waterHazards: entry.water ?? 0,
+        sandTraps: entry.sand ?? 0,
+        penaltyBalls: entry.penalties ?? 0,
+      }
+    })
+  const postRoundReport =
+    loggedHolesData.length > 0 ? generatePostRoundReport(loggedHolesData, PEBBLE_CREEK.name) : null
 
   return (
     <Layout>
@@ -313,16 +332,12 @@ export default function GolfCaddie() {
       )}
 
       {/* Post-Round Report */}
-      {showPostRoundReport && (
+      {showPostRoundReport && postRoundReport && (
         <PostRoundReportModal
-          overallStrokes={overallStrokes}
-          overallPar={overallPar}
-          overallPutts={overallPutts}
-          overallWater={overallWater}
-          overallSand={overallSand}
+          report={postRoundReport}
           holesLogged={holesLogged}
           saving={saving}
-          onPost={postRoundSummaryToFeed}
+          onPost={() => postRoundSummaryToFeed(postRoundReport)}
           onClose={() => setShowPostRoundReport(false)}
         />
       )}
@@ -482,25 +497,8 @@ function RoastPopup({ roast, onClose }) {
   )
 }
 
-function PostRoundReportModal({
-  overallStrokes,
-  overallPar,
-  overallPutts,
-  overallWater,
-  overallSand,
-  holesLogged,
-  saving,
-  onPost,
-  onClose,
-}) {
-  const relative = overallStrokes - overallPar
-  const summary = getRoundRoastSummary({
-    totalScore: overallStrokes,
-    totalPar: overallPar,
-    totalPutts: overallPutts,
-    totalWater: overallWater,
-    totalSand: overallSand,
-  })
+function PostRoundReportModal({ report, holesLogged, saving, onPost, onClose }) {
+  const relative = report.scoreRelativeToPar
 
   return (
     <div className="fixed inset-0 bg-black/80 z-50 overflow-y-auto p-4">
@@ -518,9 +516,14 @@ function PostRoundReportModal({
           </p>
         )}
 
+        {/* Badge title -- the funny "certification" this round earned */}
+        <div className="bg-orange text-black rounded-xl px-4 py-2 text-center mb-5">
+          <p className="font-display text-lg">🏆 {report.badgeTitle}</p>
+        </div>
+
         <div className="grid grid-cols-2 gap-3 mb-5">
           <div className="bg-panel rounded-xl p-3 text-center">
-            <p className="font-display text-2xl">{overallStrokes}</p>
+            <p className="font-display text-2xl">{report.totalScore}</p>
             <p className="text-muted font-body text-xs">Total Score</p>
           </div>
           <div className="bg-panel rounded-xl p-3 text-center">
@@ -530,12 +533,12 @@ function PostRoundReportModal({
             <p className="text-muted font-body text-xs">Net vs Par</p>
           </div>
           <div className="bg-panel rounded-xl p-3 text-center">
-            <p className="font-display text-2xl">{overallPutts}</p>
+            <p className="font-display text-2xl">{report.totalPutts}</p>
             <p className="text-muted font-body text-xs">Total Putts</p>
           </div>
           <div className="bg-panel rounded-xl p-3 text-center">
             <p className="font-display text-2xl">
-              {overallWater}💧 {overallSand}🏖️
+              {report.totalWater}💧 {report.totalSand}🏖️
             </p>
             <p className="text-muted font-body text-xs">Water / Sand</p>
           </div>
@@ -545,11 +548,12 @@ function PostRoundReportModal({
           <p className="text-orange font-body text-xs tracking-widest font-semibold mb-2">
             ROUND ROAST
           </p>
-          <p className="font-body text-white text-sm">{summary}</p>
+          <p className="font-body text-white text-sm font-semibold mb-2">{report.headlineRoast}</p>
+          <p className="font-body text-muted text-sm">{report.detailedRoast}</p>
         </div>
 
         <button
-          onClick={() => onPost(summary)}
+          onClick={onPost}
           disabled={saving}
           className="w-full bg-orange text-white font-display text-lg py-4 rounded-2xl disabled:opacity-60"
         >
