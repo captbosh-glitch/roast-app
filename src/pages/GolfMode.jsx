@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import Layout from '../components/Layout'
@@ -51,6 +51,23 @@ export default function GolfMode() {
   const [location, setLocation] = useState(null) // {lat, lng} or 'denied' or 'unavailable'
   const [capturingLocation, setCapturingLocation] = useState(false)
   const [logging, setLogging] = useState(false)
+  const [drinkType, setDrinkType] = useState('Beer')
+  const [tonightTotal, setTonightTotal] = useState(0)
+
+  async function loadTonightDrinks() {
+    const since = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString()
+    const { data } = await supabase
+      .from('drink_logs')
+      .select('quantity')
+      .eq('user_id', user.id)
+      .gte('created_at', since)
+    setTonightTotal((data ?? []).reduce((sum, r) => sum + r.quantity, 0))
+  }
+
+  useEffect(() => {
+    if (user) loadTonightDrinks()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user])
 
   function handleDiagramTap(e) {
     const rect = e.currentTarget.getBoundingClientRect()
@@ -129,6 +146,23 @@ export default function GolfMode() {
       setBallPosition(null)
     } catch (err) {
       alert(`Couldn't log hole: ${err.message ?? err}`)
+    } finally {
+      setLogging(false)
+    }
+  }
+
+  async function handleLogDrink() {
+    setLogging(true)
+    try {
+      const { error } = await supabase.from('drink_logs').insert({
+        user_id: user.id,
+        drink_type: drinkType,
+        quantity: 1,
+      })
+      if (error) throw error
+      await loadTonightDrinks()
+    } catch (err) {
+      alert(`Couldn't log drink: ${err.message ?? err}`)
     } finally {
       setLogging(false)
     }
@@ -229,6 +263,37 @@ export default function GolfMode() {
       >
         {logging ? 'LOGGING...' : '⛳ LOG HOLE'}
       </button>
+
+      <p className="text-muted text-sm tracking-widest font-body font-semibold mt-6 mb-3">
+        DRINK TYPE
+      </p>
+      <div className="grid grid-cols-4 gap-3 mb-6">
+        {['Beer', 'Wine', 'Cocktail', 'Shot'].map((d) => (
+          <button
+            key={d}
+            onClick={() => setDrinkType(d)}
+            className={`py-3 rounded-xl border-2 font-body font-semibold text-sm ${
+              drinkType === d ? 'border-drink text-drink bg-drink/10' : 'border-panel-border text-muted'
+            }`}
+          >
+            {d}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex items-center justify-between bg-panel border border-panel-border rounded-2xl px-5 py-4">
+        <div>
+          <p className="font-body font-semibold">Drinks tonight</p>
+          <p className="text-muted font-body text-sm">{tonightTotal} logged in the last 6 hours</p>
+        </div>
+        <button
+          onClick={handleLogDrink}
+          disabled={logging}
+          className="bg-drink text-white font-body font-semibold text-sm px-4 py-2 rounded-xl disabled:opacity-60"
+        >
+          + Log {drinkType}
+        </button>
+      </div>
     </Layout>
   )
 }
