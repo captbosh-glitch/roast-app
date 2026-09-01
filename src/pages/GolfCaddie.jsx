@@ -337,7 +337,10 @@ export default function GolfCaddie() {
           report={postRoundReport}
           holesLogged={holesLogged}
           saving={saving}
-          onPost={() => postRoundSummaryToFeed(postRoundReport)}
+          courseName={PEBBLE_CREEK.name}
+          playerName={profile?.screen_name ?? 'Golfer'}
+          playerAvatarUrl={profile?.avatar_url}
+          onShareRound={() => postRoundSummaryToFeed(postRoundReport)}
           onClose={() => setShowPostRoundReport(false)}
         />
       )}
@@ -497,68 +500,161 @@ function RoastPopup({ roast, onClose }) {
   )
 }
 
-function PostRoundReportModal({ report, holesLogged, saving, onPost, onClose }) {
-  const relative = report.scoreRelativeToPar
+function PostRoundReportModal({
+  report,
+  holesLogged,
+  saving,
+  courseName = 'Pebble Creek Golf Club',
+  playerAvatarUrl,
+  playerName = 'Golfer',
+  onShareRound,
+  onClose,
+}) {
+  const {
+    totalScore,
+    totalPar,
+    scoreRelativeToPar,
+    totalPutts,
+    totalWater,
+    totalSand,
+    totalPenalties,
+    headlineRoast,
+    detailedRoast,
+    badgeTitle,
+  } = report
+
+  const formattedScore =
+    scoreRelativeToPar > 0
+      ? `+${scoreRelativeToPar}`
+      : scoreRelativeToPar === 0
+      ? 'E'
+      : `${scoreRelativeToPar}`
+
+  // Color theme changes dynamically based on performance
+  const isBadRound = scoreRelativeToPar >= 10 || totalWater >= 3 || totalSand >= 4
 
   return (
     <div className="fixed inset-0 bg-black/80 z-50 overflow-y-auto p-4">
-      <div className="bg-[#0F0F0F] border border-orange rounded-2xl p-6 max-w-md mx-auto">
-        <div className="flex items-center justify-between mb-4">
-          <p className="font-display text-2xl text-orange">Post-Round Report</p>
-          <button onClick={onClose} className="text-muted text-xl">
-            ✕
-          </button>
-        </div>
+      {holesLogged < 18 && (
+        <p className="text-yellow-400 font-body text-xs text-center mb-2 max-w-md mx-auto">
+          Only {holesLogged}/18 holes logged so far -- this report reflects what&rsquo;s been logged.
+        </p>
+      )}
 
-        {holesLogged < 18 && (
-          <p className="text-yellow-400 font-body text-xs mb-4">
-            Only {holesLogged}/18 holes logged so far -- this report reflects what&rsquo;s been logged.
-          </p>
-        )}
-
-        {/* Badge title -- the funny "certification" this round earned */}
-        <div className="bg-orange text-black rounded-xl px-4 py-2 text-center mb-5">
-          <p className="font-display text-lg">🏆 {report.badgeTitle}</p>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3 mb-5">
-          <div className="bg-panel rounded-xl p-3 text-center">
-            <p className="font-display text-2xl">{report.totalScore}</p>
-            <p className="text-muted font-body text-xs">Total Score</p>
-          </div>
-          <div className="bg-panel rounded-xl p-3 text-center">
-            <p className="font-display text-2xl">
-              {relative === 0 ? 'E' : relative > 0 ? `+${relative}` : relative}
-            </p>
-            <p className="text-muted font-body text-xs">Net vs Par</p>
-          </div>
-          <div className="bg-panel rounded-xl p-3 text-center">
-            <p className="font-display text-2xl">{report.totalPutts}</p>
-            <p className="text-muted font-body text-xs">Total Putts</p>
-          </div>
-          <div className="bg-panel rounded-xl p-3 text-center">
-            <p className="font-display text-2xl">
-              {report.totalWater}💧 {report.totalSand}🏖️
-            </p>
-            <p className="text-muted font-body text-xs">Water / Sand</p>
-          </div>
-        </div>
-
-        <div className="bg-orange/10 border border-orange/40 rounded-2xl p-4 mb-5">
-          <p className="text-orange font-body text-xs tracking-widest font-semibold mb-2">
-            ROUND ROAST
-          </p>
-          <p className="font-body text-white text-sm font-semibold mb-2">{report.headlineRoast}</p>
-          <p className="font-body text-muted text-sm">{report.detailedRoast}</p>
-        </div>
-
-        <button
-          onClick={onPost}
-          disabled={saving}
-          className="w-full bg-orange text-white font-display text-lg py-4 rounded-2xl disabled:opacity-60"
+      <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden text-slate-100 font-sans mx-auto my-4">
+        {/* Header Banner */}
+        <div
+          className={`px-6 py-4 flex items-center justify-between border-b ${
+            isBadRound ? 'bg-rose-950/40 border-rose-900/50' : 'bg-emerald-950/40 border-emerald-900/50'
+          }`}
         >
-          {saving ? 'POSTING...' : 'POST TO GROUP FEED'}
-        </button>
+          <div className="flex items-center space-x-3">
+            <div className="relative">
+              {playerAvatarUrl ? (
+                <img
+                  src={playerAvatarUrl}
+                  alt={playerName}
+                  className="w-11 h-11 rounded-full border-2 border-amber-500 object-cover"
+                />
+              ) : (
+                <div className="w-11 h-11 rounded-full bg-slate-800 border-2 border-amber-500 flex items-center justify-center text-xl font-bold text-amber-400">
+                  {playerName.charAt(0)}
+                </div>
+              )}
+              <span className="absolute -bottom-1 -right-1 bg-amber-500 text-slate-950 text-[10px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-tighter">
+                Burned
+              </span>
+            </div>
+            <div>
+              <h3 className="font-bold text-base text-slate-100 leading-tight">{playerName}</h3>
+              <p className="text-xs text-slate-400">{courseName}</p>
+            </div>
+          </div>
+
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="text-slate-400 hover:text-slate-200 text-xl font-bold p-1 rounded-lg transition-colors"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        {/* Main Content Area */}
+        <div className="p-6 space-y-6">
+          {/* Badge Title Header */}
+          <div className="text-center space-y-1">
+            <span className="inline-block px-3 py-1 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-semibold rounded-full uppercase tracking-wider">
+              {badgeTitle}
+            </span>
+            <div className="flex items-center justify-center space-x-3 pt-2">
+              <span className="text-5xl font-black tracking-tight text-white">{totalScore}</span>
+              <div className="text-left">
+                <span
+                  className={`text-xl font-black block ${
+                    scoreRelativeToPar > 0
+                      ? 'text-rose-400'
+                      : scoreRelativeToPar < 0
+                      ? 'text-emerald-400'
+                      : 'text-amber-400'
+                  }`}
+                >
+                  ({formattedScore})
+                </span>
+                <span className="text-xs text-slate-400 font-medium">Par {totalPar}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Headline & Sarcastic Burn Box */}
+          <div className="bg-slate-950/80 border border-slate-800/80 rounded-xl p-4 space-y-2 relative overflow-hidden">
+            <div className="absolute top-0 right-0 translate-x-2 -translate-y-2 text-6xl opacity-5 select-none font-black text-rose-500">
+              🔥
+            </div>
+            <p className="text-sm font-semibold text-rose-300 leading-snug">{headlineRoast}</p>
+            <p className="text-xs text-slate-300 leading-relaxed italic">{detailedRoast}</p>
+          </div>
+
+          {/* Round Stat Highlights Grid */}
+          <div className="grid grid-cols-4 gap-2 text-center">
+            <div className="bg-slate-800/50 border border-slate-700/50 p-2.5 rounded-xl">
+              <span className="text-lg font-bold text-slate-100 block">{totalPutts}</span>
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">
+                Putts
+              </span>
+            </div>
+            <div className="bg-slate-800/50 border border-slate-700/50 p-2.5 rounded-xl">
+              <span className="text-lg font-bold text-cyan-400 block">{totalWater}</span>
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">
+                Water
+              </span>
+            </div>
+            <div className="bg-slate-800/50 border border-slate-700/50 p-2.5 rounded-xl">
+              <span className="text-lg font-bold text-amber-300 block">{totalSand}</span>
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">
+                Sand
+              </span>
+            </div>
+            <div className="bg-slate-800/50 border border-slate-700/50 p-2.5 rounded-xl">
+              <span className="text-lg font-bold text-rose-400 block">{totalPenalties}</span>
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">
+                Penalty
+              </span>
+            </div>
+          </div>
+
+          {/* Action / Live Feed Sharing Button */}
+          {onShareRound && (
+            <button
+              onClick={onShareRound}
+              disabled={saving}
+              className="w-full py-3 px-4 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-sm rounded-xl shadow-lg shadow-amber-500/20 active:scale-[0.98] transition-all flex items-center justify-center space-x-2 disabled:opacity-60"
+            >
+              <span>{saving ? '🔥 Posting...' : '🔥 Post Round to Live Group Feed'}</span>
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )
