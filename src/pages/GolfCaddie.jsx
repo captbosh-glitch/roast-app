@@ -3,12 +3,22 @@ import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import { useGolfGPS, getDistanceInYards } from '../lib/golfGps'
 import { PEBBLE_CREEK } from '../lib/pebbleCreekCourse'
+import { getRoastForHole, getRoundRoastSummary } from '../lib/roastDatabase'
 import Layout from '../components/Layout'
 
 function emptyScorecard() {
   const card = {}
   for (const hole of PEBBLE_CREEK.holes) {
-    card[hole.number] = { strokes: hole.par, putts: 2, fairwayHit: null, gir: null, logged: false }
+    card[hole.number] = {
+      strokes: hole.par,
+      putts: 2,
+      fairwayHit: null,
+      gir: null,
+      water: 0,
+      sand: 0,
+      penalties: 0,
+      logged: false,
+    }
   }
   return card
 }
@@ -24,6 +34,8 @@ export default function GolfCaddie() {
   const [showScorecard, setShowScorecard] = useState(false)
   const [logPromptHole, setLogPromptHole] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [roastPopup, setRoastPopup] = useState(null)
+  const [showPostRoundReport, setShowPostRoundReport] = useState(false)
 
   const activeHole = PEBBLE_CREEK.holes.find((h) => h.number === activeHoleNumber)
   const liveDistance = position
@@ -68,7 +80,7 @@ export default function GolfCaddie() {
     setMode('auto')
   }
 
-  async function submitHoleLog(holeNumber, { strokes, putts, fairwayHit, gir }) {
+  async function submitHoleLog(holeNumber, { strokes, putts, fairwayHit, gir, water, sand, penalties }) {
     setSaving(true)
     try {
       const hole = PEBBLE_CREEK.holes.find((h) => h.number === holeNumber)
@@ -81,6 +93,9 @@ export default function GolfCaddie() {
         putts,
         fairway_hit: fairwayHit,
         gir,
+        water_hazards: water,
+        sand_traps: sand,
+        penalties,
         round_session_id: roundSessionId,
         latitude: position?.lat ?? null,
         longitude: position?.lng ?? null,
@@ -89,9 +104,12 @@ export default function GolfCaddie() {
 
       setScorecard((prev) => ({
         ...prev,
-        [holeNumber]: { strokes, putts, fairwayHit, gir, logged: true },
+        [holeNumber]: { strokes, putts, fairwayHit, gir, water, sand, penalties, logged: true },
       }))
       setLogPromptHole(null)
+
+      // Immediate on-screen roast, right after a successful save.
+      setRoastPopup(getRoastForHole({ hole: holeNumber, par: hole.par, strokes, putts, water, sand }))
     } catch (err) {
       alert(`Couldn't save hole score: ${err.message ?? err}`)
     } finally {
@@ -105,6 +123,26 @@ export default function GolfCaddie() {
     setScorecard(emptyScorecard())
     setActiveHoleNumber(1)
     setMode('auto')
+    setShowPostRoundReport(false)
+  }
+
+  async function postRoundSummaryToFeed(summaryText) {
+    setSaving(true)
+    try {
+      const name = profile?.screen_name ?? 'Someone'
+      const { error } = await supabase.from('feed_posts').insert({
+        user_id: user.id,
+        group_id: profile.group_id,
+        activity_type: overallStrokes - overallPar <= 0 ? 'GOLF_GREAT' : 'GOLF_FAIL',
+        body: `${name}'s round at ${PEBBLE_CREEK.name}: ${summaryText}`,
+      })
+      if (error) throw error
+      alert('Posted to the group feed!')
+    } catch (err) {
+      alert(`Couldn't post round summary: ${err.message ?? err}`)
+    } finally {
+      setSaving(false)
+    }
   }
 
   const front9 = PEBBLE_CREEK.holes.filter((h) => h.number <= 9)
@@ -113,21 +151,34 @@ export default function GolfCaddie() {
   function totalsFor(holes) {
     let strokes = 0
     let par = 0
+    let putts = 0
+    let water = 0
+    let sand = 0
+    let penalties = 0
     let anyLogged = false
     for (const h of holes) {
       par += h.par
       if (scorecard[h.number]?.logged) {
-        strokes += scorecard[h.number].strokes
+        const entry = scorecard[h.number]
+        strokes += entry.strokes
+        putts += entry.putts
+        water += entry.water ?? 0
+        sand += entry.sand ?? 0
+        penalties += entry.penalties ?? 0
         anyLogged = true
       }
     }
-    return { strokes, par, anyLogged }
+    return { strokes, par, putts, water, sand, penalties, anyLogged }
   }
 
   const frontTotals = totalsFor(front9)
   const backTotals = totalsFor(back9)
   const overallStrokes = frontTotals.strokes + backTotals.strokes
   const overallPar = frontTotals.par + backTotals.par
+  const overallPutts = frontTotals.putts + backTotals.putts
+  const overallWater = frontTotals.water + backTotals.water
+  const overallSand = frontTotals.sand + backTotals.sand
+  const holesLogged = PEBBLE_CREEK.holes.filter((h) => scorecard[h.number]?.logged).length
 
   return (
     <Layout>
@@ -218,8 +269,16 @@ export default function GolfCaddie() {
         </button>
       </div>
 
-      <button onClick={startNewRound} className="text-muted font-body text-sm underline">
+      <button onClick={startNewRound} className="text-muted font-body text-sm underline mb-4">
         Start new round
+      </button>
+
+      <button
+        onClick={() => setShowPostRoundReport(true)}
+        disabled={holesLogged === 0}
+        className="block w-full text-center border-2 border-orange text-orange font-display text-base py-3 rounded-2xl disabled:opacity-30"
+      >
+        📋 Post-Round Report ({holesLogged}/18 logged)
       </button>
 
       {/* Log Hole Score prompt */}
@@ -247,6 +306,26 @@ export default function GolfCaddie() {
           onClose={() => setShowScorecard(false)}
         />
       )}
+
+      {/* Immediate per-hole roast, shown right after a successful save */}
+      {roastPopup && (
+        <RoastPopup roast={roastPopup} onClose={() => setRoastPopup(null)} />
+      )}
+
+      {/* Post-Round Report */}
+      {showPostRoundReport && (
+        <PostRoundReportModal
+          overallStrokes={overallStrokes}
+          overallPar={overallPar}
+          overallPutts={overallPutts}
+          overallWater={overallWater}
+          overallSand={overallSand}
+          holesLogged={holesLogged}
+          saving={saving}
+          onPost={postRoundSummaryToFeed}
+          onClose={() => setShowPostRoundReport(false)}
+        />
+      )}
     </Layout>
   )
 }
@@ -256,10 +335,13 @@ function LogHolePrompt({ holeNumber, hole, existing, saving, onCancel, onSubmit 
   const [putts, setPutts] = useState(existing?.putts ?? 2)
   const [fairwayHit, setFairwayHit] = useState(existing?.fairwayHit ?? null)
   const [gir, setGir] = useState(existing?.gir ?? null)
+  const [water, setWater] = useState(existing?.water ?? 0)
+  const [sand, setSand] = useState(existing?.sand ?? 0)
+  const [penalties, setPenalties] = useState(existing?.penalties ?? 0)
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-end sm:items-center justify-center z-50 p-4">
-      <div className="bg-[#0F0F0F] border border-panel-border rounded-2xl p-6 w-full max-w-sm">
+      <div className="bg-[#0F0F0F] border border-panel-border rounded-2xl p-6 w-full max-w-sm max-h-[90vh] overflow-y-auto">
         <p className="font-display text-2xl text-golf mb-4">
           Hole {holeNumber} · Par {hole.par}
         </p>
@@ -269,11 +351,20 @@ function LogHolePrompt({ holeNumber, hole, existing, saving, onCancel, onSubmit 
           <NumberField label="PUTTS" value={putts} onChange={setPutts} min={0} />
         </div>
 
-        <div className="flex gap-3 mb-6">
+        <div className="flex gap-3 mb-4">
           {hole.par !== 3 && (
             <ToggleField label="Fairway Hit" value={fairwayHit} onChange={setFairwayHit} />
           )}
           <ToggleField label="GIR" value={gir} onChange={setGir} />
+        </div>
+
+        <p className="text-muted font-body text-xs tracking-widest font-semibold mb-2">
+          HAZARDS
+        </p>
+        <div className="flex justify-between mb-6">
+          <NumberField label="WATER 💧" value={water} onChange={setWater} min={0} />
+          <NumberField label="SAND 🏖️" value={sand} onChange={setSand} min={0} />
+          <NumberField label="PENALTY ⚠️" value={penalties} onChange={setPenalties} min={0} />
         </div>
 
         <div className="flex gap-3">
@@ -284,7 +375,7 @@ function LogHolePrompt({ holeNumber, hole, existing, saving, onCancel, onSubmit 
             Skip
           </button>
           <button
-            onClick={() => onSubmit({ strokes, putts, fairwayHit, gir })}
+            onClick={() => onSubmit({ strokes, putts, fairwayHit, gir, water, sand, penalties })}
             disabled={saving}
             className="flex-1 bg-golf text-black font-display py-3 rounded-xl disabled:opacity-60"
           >
@@ -339,6 +430,127 @@ function ToggleField({ label, value, onChange }) {
           }`}
         >
           No
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function RoastPopup({ roast, onClose }) {
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    // Trigger the enter animation on the next tick after mount.
+    const t = setTimeout(() => setVisible(true), 10)
+    // Auto-dismiss after a few seconds -- still tap-to-close early.
+    const autoClose = setTimeout(onClose, 4500)
+    return () => {
+      clearTimeout(t)
+      clearTimeout(autoClose)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const CATEGORY_STYLES = {
+    parOrBetter: { border: 'border-green-500', text: 'text-green-400', label: 'NICE.' },
+    bogey: { border: 'border-yellow-500', text: 'text-yellow-400', label: 'BOGEY.' },
+    doubleBogeyOrWorse: { border: 'border-red-500', text: 'text-red-400', label: 'ROUGH.' },
+    waterHazard: { border: 'border-blue-500', text: 'text-blue-400', label: 'SPLASH.' },
+    sandTrap: { border: 'border-yellow-500', text: 'text-yellow-400', label: 'BEACH DAY.' },
+    threePutt: { border: 'border-orange-500', text: 'text-orange-400', label: 'YIKES.' },
+  }
+  const style = CATEGORY_STYLES[roast.category] ?? CATEGORY_STYLES.bogey
+
+  return (
+    <div
+      className="fixed inset-x-4 bottom-6 z-50 flex justify-center"
+      onClick={onClose}
+    >
+      <div
+        className={`bg-[#0F0F0F] border-2 ${style.border} rounded-2xl p-5 max-w-sm w-full shadow-2xl transition-all duration-300 ${
+          visible ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-90 translate-y-4'
+        }`}
+      >
+        <p className={`font-display text-xl ${style.text} mb-1`}>{style.label}</p>
+        <p className="font-body text-white">{roast.line}</p>
+        <p className="text-muted font-body text-xs mt-2">Tap to dismiss</p>
+      </div>
+    </div>
+  )
+}
+
+function PostRoundReportModal({
+  overallStrokes,
+  overallPar,
+  overallPutts,
+  overallWater,
+  overallSand,
+  holesLogged,
+  saving,
+  onPost,
+  onClose,
+}) {
+  const relative = overallStrokes - overallPar
+  const summary = getRoundRoastSummary({
+    totalScore: overallStrokes,
+    totalPar: overallPar,
+    totalPutts: overallPutts,
+    totalWater: overallWater,
+    totalSand: overallSand,
+  })
+
+  return (
+    <div className="fixed inset-0 bg-black/80 z-50 overflow-y-auto p-4">
+      <div className="bg-[#0F0F0F] border border-orange rounded-2xl p-6 max-w-md mx-auto">
+        <div className="flex items-center justify-between mb-4">
+          <p className="font-display text-2xl text-orange">Post-Round Report</p>
+          <button onClick={onClose} className="text-muted text-xl">
+            ✕
+          </button>
+        </div>
+
+        {holesLogged < 18 && (
+          <p className="text-yellow-400 font-body text-xs mb-4">
+            Only {holesLogged}/18 holes logged so far -- this report reflects what&rsquo;s been logged.
+          </p>
+        )}
+
+        <div className="grid grid-cols-2 gap-3 mb-5">
+          <div className="bg-panel rounded-xl p-3 text-center">
+            <p className="font-display text-2xl">{overallStrokes}</p>
+            <p className="text-muted font-body text-xs">Total Score</p>
+          </div>
+          <div className="bg-panel rounded-xl p-3 text-center">
+            <p className="font-display text-2xl">
+              {relative === 0 ? 'E' : relative > 0 ? `+${relative}` : relative}
+            </p>
+            <p className="text-muted font-body text-xs">Net vs Par</p>
+          </div>
+          <div className="bg-panel rounded-xl p-3 text-center">
+            <p className="font-display text-2xl">{overallPutts}</p>
+            <p className="text-muted font-body text-xs">Total Putts</p>
+          </div>
+          <div className="bg-panel rounded-xl p-3 text-center">
+            <p className="font-display text-2xl">
+              {overallWater}💧 {overallSand}🏖️
+            </p>
+            <p className="text-muted font-body text-xs">Water / Sand</p>
+          </div>
+        </div>
+
+        <div className="bg-orange/10 border border-orange/40 rounded-2xl p-4 mb-5">
+          <p className="text-orange font-body text-xs tracking-widest font-semibold mb-2">
+            ROUND ROAST
+          </p>
+          <p className="font-body text-white text-sm">{summary}</p>
+        </div>
+
+        <button
+          onClick={() => onPost(summary)}
+          disabled={saving}
+          className="w-full bg-orange text-white font-display text-lg py-4 rounded-2xl disabled:opacity-60"
+        >
+          {saving ? 'POSTING...' : 'POST TO GROUP FEED'}
         </button>
       </div>
     </div>
