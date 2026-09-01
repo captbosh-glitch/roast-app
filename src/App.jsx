@@ -14,6 +14,7 @@ import GroupView from './pages/GroupView'
 import JoinCreateGroup from './pages/JoinCreateGroup'
 import Feed from './pages/Feed'
 import PostThread from './pages/PostThread'
+import GolfCaddie from './pages/GolfCaddie'
 
 export default function App() {
   return (
@@ -33,6 +34,7 @@ export default function App() {
           <Route path="/group/join" element={<ProtectedRoute><JoinCreateGroup /></ProtectedRoute>} />
           <Route path="/feed" element={<ProtectedRoute><Feed /></ProtectedRoute>} />
           <Route path="/feed/:postId" element={<ProtectedRoute><PostThread /></ProtectedRoute>} />
+<Route path="/mode/golf/caddie" element={<ProtectedRoute><GolfCaddie /></ProtectedRoute>} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>
