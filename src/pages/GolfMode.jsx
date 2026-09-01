@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import Layout from '../components/Layout'
+import { Link } from 'react-router-dom'
 
 const TAGS = [
   { key: 'Great', icon: '✅', color: 'text-green-400 border-green-500' },
