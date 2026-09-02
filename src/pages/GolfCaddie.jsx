@@ -4,7 +4,8 @@ import { supabase } from '../lib/supabase'
 import { useGolfGPS, getDistanceInYards } from '../lib/golfGps'
 import { PEBBLE_CREEK } from '../lib/pebbleCreekCourse'
 import { getRoastForHole } from '../lib/roastDatabase'
-import { generatePostRoundReport } from '../lib/postRoundSummary'
+import { generatePostRoundReport, getDrinkRoastLine } from '../lib/postRoundSummary'
+import SatelliteMap from '../components/SatelliteMap'
 import Layout from '../components/Layout'
 
 function emptyScorecard() {
@@ -29,6 +30,7 @@ export default function GolfCaddie() {
   const { position, error: gpsError } = useGolfGPS()
 
   const [roundSessionId, setRoundSessionId] = useState(crypto.randomUUID())
+  const [roundStartTime, setRoundStartTime] = useState(new Date())
   const [mode, setMode] = useState('auto') // 'auto' | 'locked'
   const [activeHoleNumber, setActiveHoleNumber] = useState(1)
   const [scorecard, setScorecard] = useState(emptyScorecard())
@@ -37,6 +39,52 @@ export default function GolfCaddie() {
   const [saving, setSaving] = useState(false)
   const [roastPopup, setRoastPopup] = useState(null)
   const [showPostRoundReport, setShowPostRoundReport] = useState(false)
+  const [drinkType, setDrinkType] = useState('Beer')
+  const [tonightTotal, setTonightTotal] = useState(0)
+
+  async function loadTonightDrinks() {
+    const since = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString()
+    const { data } = await supabase
+      .from('drink_logs')
+      .select('quantity')
+      .eq('user_id', user.id)
+      .gte('created_at', since)
+    setTonightTotal((data ?? []).reduce((sum, r) => sum + r.quantity, 0))
+  }
+
+  useEffect(() => {
+    if (user) loadTonightDrinks()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user])
+
+  async function handleLogDrink() {
+    setSaving(true)
+    try {
+      const { error } = await supabase.from('drink_logs').insert({
+        user_id: user.id,
+        drink_type: drinkType,
+        quantity: 1,
+      })
+      if (error) throw error
+      await loadTonightDrinks()
+    } catch (err) {
+      alert(`Couldn't log drink: ${err.message ?? err}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const [roundDrinks, setRoundDrinks] = useState(0)
+
+  async function openPostRoundReport() {
+    const { data } = await supabase
+      .from('drink_logs')
+      .select('quantity')
+      .eq('user_id', user.id)
+      .gte('created_at', roundStartTime.toISOString())
+    setRoundDrinks((data ?? []).reduce((sum, r) => sum + r.quantity, 0))
+    setShowPostRoundReport(true)
+  }
 
   const activeHole = PEBBLE_CREEK.holes.find((h) => h.number === activeHoleNumber)
   const liveDistance = position
@@ -121,21 +169,23 @@ export default function GolfCaddie() {
   function startNewRound() {
     if (!confirm('Start a new round? This clears your current scorecard (already-logged holes stay saved).')) return
     setRoundSessionId(crypto.randomUUID())
+    setRoundStartTime(new Date())
     setScorecard(emptyScorecard())
     setActiveHoleNumber(1)
     setMode('auto')
     setShowPostRoundReport(false)
   }
 
-  async function postRoundSummaryToFeed(report) {
+  async function postRoundSummaryToFeed(report, drinkLine) {
     setSaving(true)
     try {
       const name = profile?.screen_name ?? 'Someone'
+      const drinkPart = drinkLine ? ` ${drinkLine}` : ''
       const { error } = await supabase.from('feed_posts').insert({
         user_id: user.id,
         group_id: profile.group_id,
         activity_type: report.scoreRelativeToPar <= 0 ? 'GOLF_GREAT' : 'GOLF_FAIL',
-        body: `${name}'s round at ${PEBBLE_CREEK.name} -- "${report.badgeTitle}": ${report.headlineRoast} ${report.detailedRoast}`,
+        body: `${name}'s round at ${PEBBLE_CREEK.name} -- "${report.badgeTitle}": ${report.headlineRoast} ${report.detailedRoast}${drinkPart}`,
       })
       if (error) throw error
       alert('Posted to the group feed!')
@@ -198,6 +248,15 @@ export default function GolfCaddie() {
     })
   const postRoundReport =
     loggedHolesData.length > 0 ? generatePostRoundReport(loggedHolesData, PEBBLE_CREEK.name) : null
+  const drinkRoastLine = postRoundReport
+    ? getDrinkRoastLine({
+        totalDrinks: roundDrinks,
+        totalWater: postRoundReport.totalWater,
+        totalSand: postRoundReport.totalSand,
+        totalScore: postRoundReport.totalScore,
+        scoreRelativeToPar: postRoundReport.scoreRelativeToPar,
+      })
+    : null
 
   return (
     <Layout>
@@ -233,6 +292,13 @@ export default function GolfCaddie() {
           </p>
         )}
       </div>
+
+      {/* Satellite eagle-eye view */}
+      <SatelliteMap
+        greenLat={activeHole.lat}
+        greenLng={activeHole.lng}
+        playerPosition={position}
+      />
 
       {/* Auto/Manual mode indicator */}
       <div className="flex items-center justify-between bg-panel border border-panel-border rounded-2xl px-5 py-3 mb-4">
@@ -293,12 +359,43 @@ export default function GolfCaddie() {
       </button>
 
       <button
-        onClick={() => setShowPostRoundReport(true)}
+        onClick={openPostRoundReport}
         disabled={holesLogged === 0}
         className="block w-full text-center border-2 border-orange text-orange font-display text-base py-3 rounded-2xl disabled:opacity-30"
       >
         📋 Post-Round Report ({holesLogged}/18 logged)
       </button>
+
+      <p className="text-muted text-sm tracking-widest font-body font-semibold mt-6 mb-3">
+        DRINK TYPE
+      </p>
+      <div className="grid grid-cols-4 gap-3 mb-6">
+        {['Beer', 'Wine', 'Cocktail', 'Shot'].map((d) => (
+          <button
+            key={d}
+            onClick={() => setDrinkType(d)}
+            className={`py-3 rounded-xl border-2 font-body font-semibold text-sm ${
+              drinkType === d ? 'border-drink text-drink bg-drink/10' : 'border-panel-border text-muted'
+            }`}
+          >
+            {d}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex items-center justify-between bg-panel border border-panel-border rounded-2xl px-5 py-4">
+        <div>
+          <p className="font-body font-semibold">Drinks tonight</p>
+          <p className="text-muted font-body text-sm">{tonightTotal} logged in the last 6 hours</p>
+        </div>
+        <button
+          onClick={handleLogDrink}
+          disabled={saving}
+          className="bg-drink text-white font-body font-semibold text-sm px-4 py-2 rounded-xl disabled:opacity-60"
+        >
+          + Log {drinkType}
+        </button>
+      </div>
 
       {/* Log Hole Score prompt */}
       {logPromptHole !== null && (
@@ -335,12 +432,13 @@ export default function GolfCaddie() {
       {showPostRoundReport && postRoundReport && (
         <PostRoundReportModal
           report={postRoundReport}
+          drinkRoastLine={drinkRoastLine}
           holesLogged={holesLogged}
           saving={saving}
           courseName={PEBBLE_CREEK.name}
           playerName={profile?.screen_name ?? 'Golfer'}
           playerAvatarUrl={profile?.avatar_url}
-          onShareRound={() => postRoundSummaryToFeed(postRoundReport)}
+          onShareRound={() => postRoundSummaryToFeed(postRoundReport, drinkRoastLine)}
           onClose={() => setShowPostRoundReport(false)}
         />
       )}
@@ -351,11 +449,40 @@ export default function GolfCaddie() {
 function LogHolePrompt({ holeNumber, hole, existing, saving, onCancel, onSubmit }) {
   const [strokes, setStrokes] = useState(existing?.strokes ?? hole.par)
   const [putts, setPutts] = useState(existing?.putts ?? 2)
-  const [fairwayHit, setFairwayHit] = useState(existing?.fairwayHit ?? null)
-  const [gir, setGir] = useState(existing?.gir ?? null)
+  // "Great"/"Failed" are mutually-exclusive quality flags (map to
+  // fairwayHit/gir). Water/Sand/Tree/OOB/Lost Ball are tap-to-increment
+  // event counts. Note: the database only has 3 hazard columns (water,
+  // sand, penalties), so Tree/Out of Bounds/Lost Ball all consolidate
+  // into the same `penalties` count -- still captured, just not broken
+  // out individually in the data.
+  const [quality, setQuality] = useState(
+    existing?.fairwayHit === true && existing?.gir === true
+      ? 'Great'
+      : existing?.fairwayHit === false
+      ? 'Failed'
+      : null
+  )
   const [water, setWater] = useState(existing?.water ?? 0)
   const [sand, setSand] = useState(existing?.sand ?? 0)
   const [penalties, setPenalties] = useState(existing?.penalties ?? 0)
+
+  const EVENTS = [
+    { key: 'Great', icon: '✅', color: 'text-green-400 border-green-500', type: 'quality' },
+    { key: 'Failed', icon: '❌', color: 'text-red-400 border-red-500', type: 'quality' },
+    { key: 'Water', icon: '💧', color: 'text-blue-400 border-blue-500', type: 'counter', value: water, set: setWater },
+    { key: 'Sand', icon: '🏖️', color: 'text-yellow-400 border-yellow-500', type: 'counter', value: sand, set: setSand },
+    { key: 'Tree', icon: '🌲', color: 'text-green-400 border-green-500', type: 'counter', value: penalties, set: setPenalties },
+    { key: 'Out of Bounds', icon: '🚧', color: 'text-orange-400 border-orange-500', type: 'counter', value: penalties, set: setPenalties },
+    { key: 'Lost Ball', icon: '❓', color: 'text-red-400 border-red-500', type: 'counter', value: penalties, set: setPenalties },
+  ]
+
+  function handleEventTap(event) {
+    if (event.type === 'quality') {
+      setQuality(quality === event.key ? null : event.key)
+    } else {
+      event.set(event.value + 1)
+    }
+  }
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-end sm:items-center justify-center z-50 p-4">
@@ -364,25 +491,35 @@ function LogHolePrompt({ holeNumber, hole, existing, saving, onCancel, onSubmit 
           Hole {holeNumber} · Par {hole.par}
         </p>
 
-        <div className="flex justify-between mb-4">
+        <div className="flex justify-between mb-6">
           <NumberField label="STROKES" value={strokes} onChange={setStrokes} min={1} />
           <NumberField label="PUTTS" value={putts} onChange={setPutts} min={0} />
         </div>
 
-        <div className="flex gap-3 mb-4">
-          {hole.par !== 3 && (
-            <ToggleField label="Fairway Hit" value={fairwayHit} onChange={setFairwayHit} />
-          )}
-          <ToggleField label="GIR" value={gir} onChange={setGir} />
-        </div>
-
-        <p className="text-muted font-body text-xs tracking-widest font-semibold mb-2">
-          HAZARDS
+        <p className="text-muted text-sm tracking-widest font-body font-semibold mb-3">
+          WHAT HAPPENED?
         </p>
-        <div className="flex justify-between mb-6">
-          <NumberField label="WATER 💧" value={water} onChange={setWater} min={0} />
-          <NumberField label="SAND 🏖️" value={sand} onChange={setSand} min={0} />
-          <NumberField label="PENALTY ⚠️" value={penalties} onChange={setPenalties} min={0} />
+        <div className="grid grid-cols-4 gap-2 mb-6">
+          {EVENTS.map((event) => {
+            const isActive = event.type === 'quality' ? quality === event.key : event.value > 0
+            return (
+              <button
+                key={event.key}
+                onClick={() => handleEventTap(event)}
+                className={`relative flex flex-col items-center gap-1 py-3 rounded-xl border-2 font-body text-xs font-semibold ${
+                  isActive ? event.color + ' bg-white/5' : 'border-panel-border text-muted'
+                }`}
+              >
+                <span className="text-xl">{event.icon}</span>
+                {event.key}
+                {event.type === 'counter' && event.value > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 bg-golf text-black text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                    {event.value}
+                  </span>
+                )}
+              </button>
+            )
+          })}
         </div>
 
         <div className="flex gap-3">
@@ -393,7 +530,17 @@ function LogHolePrompt({ holeNumber, hole, existing, saving, onCancel, onSubmit 
             Skip
           </button>
           <button
-            onClick={() => onSubmit({ strokes, putts, fairwayHit, gir, water, sand, penalties })}
+            onClick={() =>
+              onSubmit({
+                strokes,
+                putts,
+                fairwayHit: quality === 'Great' ? true : quality === 'Failed' ? false : null,
+                gir: quality === 'Great' ? true : quality === 'Failed' ? false : null,
+                water,
+                sand,
+                penalties,
+              })
+            }
             disabled={saving}
             className="flex-1 bg-golf text-black font-display py-3 rounded-xl disabled:opacity-60"
           >
@@ -502,6 +649,7 @@ function RoastPopup({ roast, onClose }) {
 
 function PostRoundReportModal({
   report,
+  drinkRoastLine,
   holesLogged,
   saving,
   courseName = 'Pebble Creek Golf Club',
@@ -615,6 +763,15 @@ function PostRoundReportModal({
             <p className="text-sm font-semibold text-rose-300 leading-snug">{headlineRoast}</p>
             <p className="text-xs text-slate-300 leading-relaxed italic">{detailedRoast}</p>
           </div>
+
+          {drinkRoastLine && (
+            <div className="bg-drink/10 border border-drink/40 rounded-xl p-4">
+              <p className="text-drink font-body text-xs tracking-widest font-semibold mb-1">
+                🍺 BEVERAGE REPORT
+              </p>
+              <p className="text-xs text-slate-200 leading-relaxed italic">{drinkRoastLine}</p>
+            </div>
+          )}
 
           {/* Round Stat Highlights Grid */}
           <div className="grid grid-cols-4 gap-2 text-center">
