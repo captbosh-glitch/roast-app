@@ -18,9 +18,9 @@ export const PEBBLE_CREEK = {
   address: '224 Route 537, Colts Neck, NJ 07722',
   centerLat: 40.3015,
   centerLng: -74.195,
-  parTotal: 71,
+  parTotal: 69,
   parFront9: 35,
-  parBack9: 36,
+  parBack9: 34,
   coordinatesVerified: false, // flip to true once real-world tested
   holes: [
     { number: 1, par: 4, yards: 340, lat: 40.3021, lng: -74.1935 },
@@ -40,6 +40,6 @@ export const PEBBLE_CREEK = {
     { number: 15, par: 4, yards: 390, lat: 40.3029, lng: -74.1932 },
     { number: 16, par: 3, yards: 175, lat: 40.3018, lng: -74.1915 },
     { number: 17, par: 4, yards: 370, lat: 40.3002, lng: -74.193 },
-    { number: 18, par: 5, yards: 500, lat: 40.3014, lng: -74.1948 },
+    { number: 18, par: 3, yards: 180, lat: 40.3014, lng: -74.1948 },
   ],
 }
