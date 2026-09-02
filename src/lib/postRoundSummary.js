@@ -65,3 +65,28 @@ export function generatePostRoundReport(holes, courseName = 'the course') {
     badgeTitle,
   }
 }
+
+/**
+ * Weaves alcohol consumption into the roast, as a supplementary line
+ * layered on top of the existing scenario-based report above (rather
+ * than replacing that already-tested logic). Returns null when there's
+ * nothing drink-related worth adding (0-2 drinks and a reasonable
+ * score).
+ */
+export function getDrinkRoastLine({ totalDrinks, totalWater, totalSand, totalScore, scoreRelativeToPar }) {
+  const totalHazards = totalWater + totalSand
+
+  if (totalHazards >= 4 && totalDrinks >= 4) {
+    return `${totalWater} water ball${totalWater === 1 ? '' : 's'} and ${totalDrinks} drink${totalDrinks === 1 ? '' : 's'} -- at least your liver and the lake are both full.`
+  }
+  if (totalDrinks === 0 && scoreRelativeToPar > 5) {
+    return `You shot a ${totalScore} completely sober? That's actually impressive in the worst way.`
+  }
+  if (totalDrinks >= 6) {
+    return `You logged ${totalDrinks} drinks across the round. You didn't play golf; you went day-drinking in a polo shirt with a golf cart.`
+  }
+  if (totalDrinks >= 3) {
+    return `You had ${totalDrinks} drinks out there today. Your swing wasn't failing; your motor skills were.`
+  }
+  return null
+}
