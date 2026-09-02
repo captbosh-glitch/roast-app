@@ -605,14 +605,10 @@ function RoastPopup({ roast, onClose }) {
   const [visible, setVisible] = useState(false)
 
   useEffect(() => {
-    // Trigger the enter animation on the next tick after mount.
+    // Trigger the enter animation on the next tick after mount. No
+    // auto-dismiss anymore -- stays up until explicitly tapped away.
     const t = setTimeout(() => setVisible(true), 10)
-    // Auto-dismiss after a few seconds -- still tap-to-close early.
-    const autoClose = setTimeout(onClose, 4500)
-    return () => {
-      clearTimeout(t)
-      clearTimeout(autoClose)
-    }
+    return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
