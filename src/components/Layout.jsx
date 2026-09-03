@@ -92,7 +92,7 @@ export default function Layout({ children }) {
 
   return (
     <div className="min-h-screen bg-bg text-white">
-      <header className="flex items-center gap-5 px-6 py-5">
+      <header className="flex items-center gap-9 px-6 py-5">
         <button
           onClick={() => setMenuOpen(true)}
           aria-label="Open menu"
