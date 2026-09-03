@@ -36,7 +36,7 @@ function RolloverMenu({ open, onClose }) {
         />
       )}
       <nav
-        className={`fixed top-0 left-0 h-full w-72 bg-[#121212] z-50 p-8 transform transition-transform duration-200 ${
+        className={`fixed top-0 left-0 h-full w-72 bg-[#121212] z-50 px-8 pb-8 pt-[calc(env(safe-area-inset-top)_+_32px)] transform transition-transform duration-200 ${
           open ? 'translate-x-0' : '-translate-x-full'
         }`}
         aria-label="Main menu"
@@ -92,7 +92,7 @@ export default function Layout({ children }) {
 
   return (
     <div className="min-h-screen bg-bg text-white">
-      <header className="flex items-center gap-9 px-6 py-5">
+      <header className="flex items-center gap-9 px-6 pb-5 pt-[calc(env(safe-area-inset-top)_+_20px)]">
         <button
           onClick={() => setMenuOpen(true)}
           aria-label="Open menu"
