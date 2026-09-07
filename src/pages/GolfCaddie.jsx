@@ -2,15 +2,17 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import { useGolfGPS, getDistanceInYards } from '../lib/golfGps'
-import { PEBBLE_CREEK } from '../lib/pebbleCreekCourse'
+import { ALL_COURSES, getCourseById, getAllLocations } from '../lib/golfCourses'
 import { getRoastForHole } from '../lib/roastDatabase'
 import { generatePostRoundReport, getDrinkRoastLine } from '../lib/postRoundSummary'
 import SatelliteMap from '../components/SatelliteMap'
 import Layout from '../components/Layout'
 
-function emptyScorecard() {
+const DEFAULT_COURSE_ID = 'pebble-creek-colts-neck'
+
+function emptyScorecard(course) {
   const card = {}
-  for (const hole of PEBBLE_CREEK.holes) {
+  for (const hole of course.holes) {
     card[hole.number] = {
       strokes: hole.par,
       putts: 2,
@@ -31,9 +33,11 @@ export default function GolfCaddie() {
 
   const [roundSessionId, setRoundSessionId] = useState(crypto.randomUUID())
   const [roundStartTime, setRoundStartTime] = useState(new Date())
+  const [selectedCourseId, setSelectedCourseId] = useState(DEFAULT_COURSE_ID)
+  const course = getCourseById(selectedCourseId)
   const [mode, setMode] = useState('auto') // 'auto' | 'locked'
   const [activeHoleNumber, setActiveHoleNumber] = useState(1)
-  const [scorecard, setScorecard] = useState(emptyScorecard())
+  const [scorecard, setScorecard] = useState(() => emptyScorecard(course))
   const [showScorecard, setShowScorecard] = useState(false)
   const [logPromptHole, setLogPromptHole] = useState(null)
   const [saving, setSaving] = useState(false)
@@ -86,7 +90,7 @@ export default function GolfCaddie() {
     setShowPostRoundReport(true)
   }
 
-  const activeHole = PEBBLE_CREEK.holes.find((h) => h.number === activeHoleNumber)
+  const activeHole = course.holes.find((h) => h.number === activeHoleNumber)
   const liveDistance = position
     ? getDistanceInYards(position.lat, position.lng, activeHole.lat, activeHole.lng)
     : null
@@ -101,7 +105,7 @@ export default function GolfCaddie() {
 
     let nearestHole = null
     let nearestDist = Infinity
-    for (const hole of PEBBLE_CREEK.holes) {
+    for (const hole of course.holes) {
       const d = getDistanceInYards(position.lat, position.lng, hole.lat, hole.lng)
       if (d < nearestDist) {
         nearestDist = d
@@ -132,10 +136,10 @@ export default function GolfCaddie() {
   async function submitHoleLog(holeNumber, { strokes, putts, fairwayHit, gir, water, sand, penalties }) {
     setSaving(true)
     try {
-      const hole = PEBBLE_CREEK.holes.find((h) => h.number === holeNumber)
+      const hole = course.holes.find((h) => h.number === holeNumber)
       const { error } = await supabase.from('golf_holes').insert({
         user_id: user.id,
-        course_name: PEBBLE_CREEK.name,
+        course_name: course.name,
         hole_number: holeNumber,
         par: hole.par,
         score: strokes,
@@ -170,7 +174,20 @@ export default function GolfCaddie() {
     if (!confirm('Start a new round? This clears your current scorecard (already-logged holes stay saved).')) return
     setRoundSessionId(crypto.randomUUID())
     setRoundStartTime(new Date())
-    setScorecard(emptyScorecard())
+    setScorecard(emptyScorecard(course))
+    setActiveHoleNumber(1)
+    setMode('auto')
+    setShowPostRoundReport(false)
+  }
+
+  function handleCourseChange(newCourseId) {
+    if (newCourseId === selectedCourseId) return
+    if (!confirm('Switch courses? This starts a fresh round and clears your current scorecard (already-logged holes stay saved).')) return
+    const newCourse = getCourseById(newCourseId)
+    setSelectedCourseId(newCourseId)
+    setRoundSessionId(crypto.randomUUID())
+    setRoundStartTime(new Date())
+    setScorecard(emptyScorecard(newCourse))
     setActiveHoleNumber(1)
     setMode('auto')
     setShowPostRoundReport(false)
@@ -185,7 +202,7 @@ export default function GolfCaddie() {
         user_id: user.id,
         group_id: profile.group_id,
         activity_type: report.scoreRelativeToPar <= 0 ? 'GOLF_GREAT' : 'GOLF_FAIL',
-        body: `${name}'s round at ${PEBBLE_CREEK.name} -- "${report.badgeTitle}": ${report.headlineRoast} ${report.detailedRoast}${drinkPart}`,
+        body: `${name}'s round at ${course.name} -- "${report.badgeTitle}": ${report.headlineRoast} ${report.detailedRoast}${drinkPart}`,
       })
       if (error) throw error
       alert('Posted to the group feed!')
@@ -196,8 +213,8 @@ export default function GolfCaddie() {
     }
   }
 
-  const front9 = PEBBLE_CREEK.holes.filter((h) => h.number <= 9)
-  const back9 = PEBBLE_CREEK.holes.filter((h) => h.number > 9)
+  const front9 = course.holes.filter((h) => h.number <= 9)
+  const back9 = course.holes.filter((h) => h.number > 9)
 
   function totalsFor(holes) {
     let strokes = 0
@@ -229,11 +246,11 @@ export default function GolfCaddie() {
   const overallPutts = frontTotals.putts + backTotals.putts
   const overallWater = frontTotals.water + backTotals.water
   const overallSand = frontTotals.sand + backTotals.sand
-  const holesLogged = PEBBLE_CREEK.holes.filter((h) => scorecard[h.number]?.logged).length
+  const holesLogged = course.holes.filter((h) => scorecard[h.number]?.logged).length
 
   // Build the array the report generator expects, from whichever holes
   // have actually been logged so far.
-  const loggedHolesData = PEBBLE_CREEK.holes
+  const loggedHolesData = course.holes
     .filter((h) => scorecard[h.number]?.logged)
     .map((h) => {
       const entry = scorecard[h.number]
@@ -247,7 +264,7 @@ export default function GolfCaddie() {
       }
     })
   const postRoundReport =
-    loggedHolesData.length > 0 ? generatePostRoundReport(loggedHolesData, PEBBLE_CREEK.name) : null
+    loggedHolesData.length > 0 ? generatePostRoundReport(loggedHolesData, course.name) : null
   const drinkRoastLine = postRoundReport
     ? getDrinkRoastLine({
         totalDrinks: roundDrinks,
@@ -263,8 +280,25 @@ export default function GolfCaddie() {
       <p className="text-golf text-sm tracking-widest font-body font-semibold mt-4 mb-1">
         GPS CADDIE
       </p>
-      <h1 className="font-display text-3xl text-golf mb-1">{PEBBLE_CREEK.name}</h1>
-      {!PEBBLE_CREEK.coordinatesVerified && (
+      <select
+        value={selectedCourseId}
+        onChange={(e) => handleCourseChange(e.target.value)}
+        className="w-full bg-transparent font-display text-3xl text-golf mb-1 outline-none border-none appearance-none cursor-pointer"
+      >
+        {getAllLocations().map((location) => (
+          <optgroup key={location} label={location} className="bg-[#0F0F0F] text-white font-body text-base">
+            {ALL_COURSES.filter((c) => c.location === location).map((c) => (
+              <option key={c.id} value={c.id} className="bg-[#0F0F0F] text-white font-body text-base">
+                {c.name}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+      <p className="text-muted font-body text-xs mb-1">
+        Par {course.parTotal} · {course.totalYardage} yds
+      </p>
+      {!course.coordinatesVerified && (
         <p className="text-yellow-400 font-body text-xs mb-4">
           ⚠️ Hole coordinates are AI-estimated, not yet field-verified. Distances may be off --
           please report anything that looks wrong.
@@ -321,7 +355,7 @@ export default function GolfCaddie() {
 
       {/* Manual hole selector */}
       <div className="grid grid-cols-6 gap-2 mb-6">
-        {PEBBLE_CREEK.holes.map((h) => (
+        {course.holes.map((h) => (
           <button
             key={h.number}
             onClick={() => selectHoleManually(h.number)}
@@ -401,7 +435,7 @@ export default function GolfCaddie() {
       {logPromptHole !== null && (
         <LogHolePrompt
           holeNumber={logPromptHole}
-          hole={PEBBLE_CREEK.holes.find((h) => h.number === logPromptHole)}
+          hole={course.holes.find((h) => h.number === logPromptHole)}
           existing={scorecard[logPromptHole]}
           saving={saving}
           onCancel={() => setLogPromptHole(null)}
@@ -435,7 +469,7 @@ export default function GolfCaddie() {
           drinkRoastLine={drinkRoastLine}
           holesLogged={holesLogged}
           saving={saving}
-          courseName={PEBBLE_CREEK.name}
+          courseName={course.name}
           playerName={profile?.screen_name ?? 'Golfer'}
           playerAvatarUrl={profile?.avatar_url}
           onShareRound={() => postRoundSummaryToFeed(postRoundReport, drinkRoastLine)}
