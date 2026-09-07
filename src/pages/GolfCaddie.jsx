@@ -280,21 +280,26 @@ export default function GolfCaddie() {
       <p className="text-golf text-sm tracking-widest font-body font-semibold mt-4 mb-1">
         GPS CADDIE
       </p>
-      <select
-        value={selectedCourseId}
-        onChange={(e) => handleCourseChange(e.target.value)}
-        className="w-full bg-transparent font-display text-3xl text-golf mb-1 outline-none border-none appearance-none cursor-pointer"
-      >
-        {getAllLocations().map((location) => (
-          <optgroup key={location} label={location} className="bg-[#0F0F0F] text-white font-body text-base">
-            {ALL_COURSES.filter((c) => c.location === location).map((c) => (
-              <option key={c.id} value={c.id} className="bg-[#0F0F0F] text-white font-body text-base">
-                {c.name}
-              </option>
-            ))}
-          </optgroup>
-        ))}
-      </select>
+      <div className="relative mb-1">
+        <select
+          value={selectedCourseId}
+          onChange={(e) => handleCourseChange(e.target.value)}
+          className="w-full bg-transparent font-display text-3xl text-golf outline-none border-none appearance-none cursor-pointer pr-8"
+        >
+          {getAllLocations().map((location) => (
+            <optgroup key={location} label={location} className="bg-[#0F0F0F] text-white font-body text-base">
+              {ALL_COURSES.filter((c) => c.location === location).map((c) => (
+                <option key={c.id} value={c.id} className="bg-[#0F0F0F] text-white font-body text-base">
+                  {c.name}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+        <span className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-golf text-xl">
+          ▾
+        </span>
+      </div>
       <p className="text-muted font-body text-xs mb-1">
         Par {course.parTotal} · {course.totalYardage} yds
       </p>
