@@ -9,6 +9,46 @@ import SatelliteMap from '../components/SatelliteMap'
 import Layout from '../components/Layout'
 
 const DEFAULT_COURSE_ID = 'pebble-creek-colts-neck'
+const ROUND_STORAGE_KEY = 'golf_active_round'
+const ROUND_EXPIRY_MS = 8 * 60 * 60 * 1000 // 8 hours -- longer than any real round
+
+/**
+ * Persists just the in-progress round state (which course, which hole,
+ * auto/locked mode, and the scorecard so far) so it survives navigating
+ * away to another part of the app and back. Already-logged holes are
+ * separately safe in the database regardless -- this only recovers the
+ * "where was I" state that would otherwise reset on remount.
+ */
+function loadPersistedRound() {
+  try {
+    const raw = localStorage.getItem(ROUND_STORAGE_KEY)
+    if (!raw) return null
+    const saved = JSON.parse(raw)
+    if (Date.now() - saved.savedAt > ROUND_EXPIRY_MS) return null
+    return saved
+  } catch {
+    // Corrupted or unreadable storage should never crash the app --
+    // just behave as if there's nothing to restore.
+    return null
+  }
+}
+
+function savePersistedRound(state) {
+  try {
+    localStorage.setItem(ROUND_STORAGE_KEY, JSON.stringify({ ...state, savedAt: Date.now() }))
+  } catch {
+    // Storage full or unavailable (e.g. private browsing) -- the round
+    // just won't survive navigation this time, not worth surfacing.
+  }
+}
+
+function clearPersistedRound() {
+  try {
+    localStorage.removeItem(ROUND_STORAGE_KEY)
+  } catch {
+    // Nothing to do if this fails -- it'll just get overwritten next save.
+  }
+}
 
 function emptyScorecard(course) {
   const card = {}
@@ -31,35 +71,53 @@ export default function GolfCaddie() {
   const { user, profile } = useAuth()
   const { position, error: gpsError } = useGolfGPS()
 
-  const [roundSessionId, setRoundSessionId] = useState(crypto.randomUUID())
-  const [roundStartTime, setRoundStartTime] = useState(new Date())
-  const [selectedCourseId, setSelectedCourseId] = useState(DEFAULT_COURSE_ID)
+  const persisted = loadPersistedRound()
+
+  const [roundSessionId, setRoundSessionId] = useState(persisted?.roundSessionId ?? crypto.randomUUID())
+  const [roundStartTime, setRoundStartTime] = useState(
+    persisted?.roundStartTime ? new Date(persisted.roundStartTime) : new Date()
+  )
+  const [selectedCourseId, setSelectedCourseId] = useState(persisted?.selectedCourseId ?? DEFAULT_COURSE_ID)
   const course = getCourseById(selectedCourseId)
-  const [mode, setMode] = useState('auto') // 'auto' | 'locked'
-  const [activeHoleNumber, setActiveHoleNumber] = useState(1)
-  const [scorecard, setScorecard] = useState(() => emptyScorecard(course))
+  const [mode, setMode] = useState(persisted?.mode ?? 'auto') // 'auto' | 'locked'
+  const [activeHoleNumber, setActiveHoleNumber] = useState(persisted?.activeHoleNumber ?? 1)
+  const [scorecard, setScorecard] = useState(() => persisted?.scorecard ?? emptyScorecard(course))
   const [showScorecard, setShowScorecard] = useState(false)
   const [logPromptHole, setLogPromptHole] = useState(null)
   const [saving, setSaving] = useState(false)
   const [roastPopup, setRoastPopup] = useState(null)
   const [showPostRoundReport, setShowPostRoundReport] = useState(false)
   const [drinkType, setDrinkType] = useState('Beer')
-  const [tonightTotal, setTonightTotal] = useState(0)
+  const [roundDrinkTotal, setRoundDrinkTotal] = useState(0)
 
-  async function loadTonightDrinks() {
-    const since = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString()
+  // Persist the in-progress round any time its key pieces change, so
+  // navigating to another part of the app and back doesn't lose "where
+  // was I" state. Already-logged holes are safe in the database
+  // regardless -- this is just the local session bookkeeping.
+  useEffect(() => {
+    savePersistedRound({
+      roundSessionId,
+      roundStartTime: roundStartTime.toISOString(),
+      selectedCourseId,
+      mode,
+      activeHoleNumber,
+      scorecard,
+    })
+  }, [roundSessionId, roundStartTime, selectedCourseId, mode, activeHoleNumber, scorecard])
+
+  async function loadRoundDrinks() {
     const { data } = await supabase
       .from('drink_logs')
       .select('quantity')
       .eq('user_id', user.id)
-      .gte('created_at', since)
-    setTonightTotal((data ?? []).reduce((sum, r) => sum + r.quantity, 0))
+      .gte('created_at', roundStartTime.toISOString())
+    setRoundDrinkTotal((data ?? []).reduce((sum, r) => sum + r.quantity, 0))
   }
 
   useEffect(() => {
-    if (user) loadTonightDrinks()
+    if (user) loadRoundDrinks()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user])
+  }, [user, roundStartTime])
 
   async function handleLogDrink() {
     setSaving(true)
@@ -70,7 +128,7 @@ export default function GolfCaddie() {
         quantity: 1,
       })
       if (error) throw error
-      await loadTonightDrinks()
+      await loadRoundDrinks()
     } catch (err) {
       alert(`Couldn't log drink: ${err.message ?? err}`)
     } finally {
@@ -78,15 +136,7 @@ export default function GolfCaddie() {
     }
   }
 
-  const [roundDrinks, setRoundDrinks] = useState(0)
-
-  async function openPostRoundReport() {
-    const { data } = await supabase
-      .from('drink_logs')
-      .select('quantity')
-      .eq('user_id', user.id)
-      .gte('created_at', roundStartTime.toISOString())
-    setRoundDrinks((data ?? []).reduce((sum, r) => sum + r.quantity, 0))
+  function openPostRoundReport() {
     setShowPostRoundReport(true)
   }
 
@@ -172,6 +222,7 @@ export default function GolfCaddie() {
 
   function startNewRound() {
     if (!confirm('Start a new round? This clears your current scorecard (already-logged holes stay saved).')) return
+    clearPersistedRound()
     setRoundSessionId(crypto.randomUUID())
     setRoundStartTime(new Date())
     setScorecard(emptyScorecard(course))
@@ -183,6 +234,7 @@ export default function GolfCaddie() {
   function handleCourseChange(newCourseId) {
     if (newCourseId === selectedCourseId) return
     if (!confirm('Switch courses? This starts a fresh round and clears your current scorecard (already-logged holes stay saved).')) return
+    clearPersistedRound()
     const newCourse = getCourseById(newCourseId)
     setSelectedCourseId(newCourseId)
     setRoundSessionId(crypto.randomUUID())
@@ -205,6 +257,7 @@ export default function GolfCaddie() {
         body: `${name}'s round at ${course.name} -- "${report.badgeTitle}": ${report.headlineRoast} ${report.detailedRoast}${drinkPart}`,
       })
       if (error) throw error
+      clearPersistedRound()
       alert('Posted to the group feed!')
     } catch (err) {
       alert(`Couldn't post round summary: ${err.message ?? err}`)
@@ -267,7 +320,7 @@ export default function GolfCaddie() {
     loggedHolesData.length > 0 ? generatePostRoundReport(loggedHolesData, course.name) : null
   const drinkRoastLine = postRoundReport
     ? getDrinkRoastLine({
-        totalDrinks: roundDrinks,
+        totalDrinks: roundDrinkTotal,
         totalWater: postRoundReport.totalWater,
         totalSand: postRoundReport.totalSand,
         totalScore: postRoundReport.totalScore,
@@ -424,8 +477,8 @@ export default function GolfCaddie() {
 
       <div className="flex items-center justify-between bg-panel border border-panel-border rounded-2xl px-5 py-4">
         <div>
-          <p className="font-body font-semibold">Drinks tonight</p>
-          <p className="text-muted font-body text-sm">{tonightTotal} logged in the last 6 hours</p>
+          <p className="font-body font-semibold">Drinks this round</p>
+          <p className="text-muted font-body text-sm">{roundDrinkTotal} logged this round</p>
         </div>
         <button
           onClick={handleLogDrink}
@@ -489,11 +542,12 @@ function LogHolePrompt({ holeNumber, hole, existing, saving, onCancel, onSubmit 
   const [strokes, setStrokes] = useState(existing?.strokes ?? hole.par)
   const [putts, setPutts] = useState(existing?.putts ?? 2)
   // "Great"/"Failed" are mutually-exclusive quality flags (map to
-  // fairwayHit/gir). Water/Sand/Tree/OOB/Lost Ball are tap-to-increment
-  // event counts. Note: the database only has 3 hazard columns (water,
-  // sand, penalties), so Tree/Out of Bounds/Lost Ball all consolidate
-  // into the same `penalties` count -- still captured, just not broken
-  // out individually in the data.
+  // fairwayHit/gir). Water/Sand/Tree/OOB/Lost Ball are each independent
+  // tap-to-increment event counts. The database only has 3 hazard
+  // columns (water, sand, penalties), so Tree/Out of Bounds/Lost Ball
+  // are tracked separately here in the UI, then summed into the single
+  // `penalties` value only at submission time -- fixes the earlier bug
+  // where all three shared one counter and showed the same badge number.
   const [quality, setQuality] = useState(
     existing?.fairwayHit === true && existing?.gir === true
       ? 'Great'
@@ -503,16 +557,22 @@ function LogHolePrompt({ holeNumber, hole, existing, saving, onCancel, onSubmit 
   )
   const [water, setWater] = useState(existing?.water ?? 0)
   const [sand, setSand] = useState(existing?.sand ?? 0)
-  const [penalties, setPenalties] = useState(existing?.penalties ?? 0)
+  // Note: if re-opening a hole logged before this fix, the original
+  // combined penalties total can't be split back into its three parts
+  // (that breakdown was never stored) -- these start at 0 rather than
+  // guess, which only affects editing old data, not new logging.
+  const [treeCount, setTreeCount] = useState(0)
+  const [oobCount, setOobCount] = useState(0)
+  const [lostBallCount, setLostBallCount] = useState(0)
 
   const EVENTS = [
     { key: 'Great', icon: '✅', color: 'text-green-400 border-green-500', type: 'quality' },
     { key: 'Failed', icon: '❌', color: 'text-red-400 border-red-500', type: 'quality' },
     { key: 'Water', icon: '💧', color: 'text-blue-400 border-blue-500', type: 'counter', value: water, set: setWater },
     { key: 'Sand', icon: '🏖️', color: 'text-yellow-400 border-yellow-500', type: 'counter', value: sand, set: setSand },
-    { key: 'Tree', icon: '🌲', color: 'text-green-400 border-green-500', type: 'counter', value: penalties, set: setPenalties },
-    { key: 'Out of Bounds', icon: '🚧', color: 'text-orange-400 border-orange-500', type: 'counter', value: penalties, set: setPenalties },
-    { key: 'Lost Ball', icon: '❓', color: 'text-red-400 border-red-500', type: 'counter', value: penalties, set: setPenalties },
+    { key: 'Tree', icon: '🌲', color: 'text-green-400 border-green-500', type: 'counter', value: treeCount, set: setTreeCount },
+    { key: 'Out of Bounds', icon: '🚧', color: 'text-orange-400 border-orange-500', type: 'counter', value: oobCount, set: setOobCount },
+    { key: 'Lost Ball', icon: '❓', color: 'text-red-400 border-red-500', type: 'counter', value: lostBallCount, set: setLostBallCount },
   ]
 
   function handleEventTap(event) {
@@ -577,7 +637,7 @@ function LogHolePrompt({ holeNumber, hole, existing, saving, onCancel, onSubmit 
                 gir: quality === 'Great' ? true : quality === 'Failed' ? false : null,
                 water,
                 sand,
-                penalties,
+                penalties: treeCount + oobCount + lostBallCount,
               })
             }
             disabled={saving}
