@@ -777,7 +777,7 @@ function PostRoundReportModal({
   const isBadRound = scoreRelativeToPar >= 10 || totalWater >= 3 || totalSand >= 4
 
   return (
-    <div className="fixed inset-0 bg-black/80 z-50 overflow-y-auto p-4">
+    <div className="fixed inset-0 bg-black/80 z-50 overflow-y-auto p-4 pt-[calc(env(safe-area-inset-top)_+_16px)]">
       {holesLogged < 18 && (
         <p className="text-yellow-400 font-body text-xs text-center mb-2 max-w-md mx-auto">
           Only {holesLogged}/18 holes logged so far -- this report reflects what&rsquo;s been logged.
@@ -938,7 +938,7 @@ function ScorecardModal({ scorecard, front9, back9, frontTotals, backTotals, ove
   const overallRelative = overallStrokes - overallPar
 
   return (
-    <div className="fixed inset-0 bg-black/80 z-50 overflow-y-auto p-4">
+    <div className="fixed inset-0 bg-black/80 z-50 overflow-y-auto p-4 pt-[calc(env(safe-area-inset-top)_+_16px)]">
       <div className="bg-[#0F0F0F] border border-panel-border rounded-2xl p-5 max-w-md mx-auto">
         <div className="flex items-center justify-between mb-4">
           <p className="font-display text-2xl text-golf">Scorecard</p>
