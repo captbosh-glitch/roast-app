@@ -32,10 +32,12 @@ function initials(name) {
 }
 
 export default function Feed() {
-  const { user, profile } = useAuth()
+  const { user, profile, switchActiveGroup } = useAuth()
   const [posts, setPosts] = useState([])
   const [loading, setLoading] = useState(true)
   const [newSinceVisit, setNewSinceVisit] = useState(0)
+  const [myGroups, setMyGroups] = useState([])
+  const [switching, setSwitching] = useState(false)
   // postId -> { count, likedByMe }
   const [likes, setLikes] = useState({})
   // postId -> count
@@ -63,6 +65,28 @@ export default function Feed() {
     const count = posts.filter((p) => new Date(p.created_at) > lastVisitThreshold).length
     setNewSinceVisit(count)
   }, [posts, lastVisitThreshold])
+
+  async function loadMyGroups() {
+    const { data } = await supabase
+      .from('group_memberships')
+      .select('group_id, groups(id, name, invite_code)')
+      .eq('user_id', user.id)
+      .order('joined_at', { ascending: true })
+    setMyGroups((data ?? []).map((row) => row.groups).filter(Boolean))
+  }
+
+  async function handleSwitchGroup(newGroupId) {
+    if (newGroupId === profile.group_id) return
+    setSwitching(true)
+    try {
+      const { error } = await switchActiveGroup(newGroupId)
+      if (error) throw error
+    } catch (err) {
+      alert(`Couldn't switch groups: ${err.message ?? err}`)
+    } finally {
+      setSwitching(false)
+    }
+  }
 
   async function loadEngagement(postIds) {
     if (postIds.length === 0) return
@@ -127,6 +151,7 @@ export default function Feed() {
   useEffect(() => {
     if (!profile?.group_id) return
     loadPosts()
+    loadMyGroups()
 
     // Real-time: new posts from anyone in the group appear instantly,
     // without needing to refresh -- this is what makes the "LIVE" badge
@@ -160,7 +185,31 @@ export default function Feed() {
       <p className="text-orange text-sm tracking-widest font-body font-semibold mt-4 mb-2">
         YOUR CREW&rsquo;S FINEST MOMENTS
       </p>
-      <h1 className="font-display text-4xl text-orange mb-8">Live Feed</h1>
+      <h1 className="font-display text-4xl text-orange mb-2">Live Feed</h1>
+
+      {myGroups.length > 1 ? (
+        <div className="relative mb-6 inline-block">
+          <select
+            value={profile.group_id}
+            onChange={(e) => handleSwitchGroup(e.target.value)}
+            disabled={switching}
+            className="bg-transparent font-body font-semibold text-muted outline-none border-none appearance-none cursor-pointer pr-6"
+          >
+            {myGroups.map((g) => (
+              <option key={g.id} value={g.id} className="bg-[#0F0F0F] text-white font-body">
+                {g.name}
+              </option>
+            ))}
+          </select>
+          <span className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-muted text-sm">
+            ▾
+          </span>
+        </div>
+      ) : (
+        myGroups[0] && (
+          <p className="text-muted font-body font-semibold mb-6">{myGroups[0].name}</p>
+        )
+      )}
 
       <p className="font-display text-2xl text-orange mb-4">Feed Activity</p>
       <div className="flex gap-4 mb-6">
