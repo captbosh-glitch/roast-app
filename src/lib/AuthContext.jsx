@@ -71,6 +71,16 @@ export function AuthProvider({ children }) {
     })
 
     if (profileError) return { error: profileError }
+
+    // Record real membership for this initial default-group assignment
+    // too -- without this, a brand new user's profile.group_id would
+    // correctly point at the default group, but they'd show as a
+    // member of zero groups in the group-switcher UI.
+    const { error: membershipError } = await supabase
+      .from('group_memberships')
+      .insert({ user_id: data.user.id, group_id: group.id })
+    if (membershipError) return { error: membershipError }
+
     return { data }
   }
 
@@ -92,18 +102,43 @@ export function AuthProvider({ children }) {
     return { error }
   }
 
-  // Switching groups goes through a dedicated database function rather
-  // than a plain profiles update -- a direct update to group_id hit an
-  // RLS timing issue (the SELECT policy governing your own row depends
-  // on group_id, creating a chicken-and-egg check during the same
-  // operation). This sidesteps that entirely.
-  async function switchGroup(newGroupId) {
-    const { error } = await supabase.rpc('switch_my_group', { new_group_id: newGroupId })
+  // Joining a group (by invite code or after creating one) adds real
+  // membership and makes it your active group in one step.
+  async function joinGroup(groupId) {
+    const { error } = await supabase.rpc('join_group', { target_group_id: groupId })
     if (!error) await loadProfile(user.id)
     return { error }
   }
 
-  const value = { user, profile, loading, signUp, signIn, signOut, updateProfile, switchGroup }
+  // Switching your active group among ones you're already a member of
+  // -- doesn't touch membership, just which group is currently active.
+  async function switchActiveGroup(groupId) {
+    const { error } = await supabase.rpc('switch_active_group', { target_group_id: groupId })
+    if (!error) await loadProfile(user.id)
+    return { error }
+  }
+
+  // Leaving a group removes membership entirely. If it was your active
+  // group, the database automatically switches you to another group
+  // you still belong to (or the default group if that was your last one).
+  async function leaveGroup(groupId) {
+    const { error } = await supabase.rpc('leave_group', { target_group_id: groupId })
+    if (!error) await loadProfile(user.id)
+    return { error }
+  }
+
+  const value = {
+    user,
+    profile,
+    loading,
+    signUp,
+    signIn,
+    signOut,
+    updateProfile,
+    joinGroup,
+    switchActiveGroup,
+    leaveGroup,
+  }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
