@@ -8,13 +8,24 @@ const DEFAULT_INVITE_CODE = 'ROAST-BETA1'
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000
 
 export default function GroupView() {
-  const { user, profile, switchGroup } = useAuth()
+  const { user, profile, joinGroup, switchActiveGroup, leaveGroup } = useAuth()
   const [group, setGroup] = useState(null)
+  const [myGroups, setMyGroups] = useState([])
   const [members, setMembers] = useState([])
   const [activityCount, setActivityCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [copied, setCopied] = useState(false)
   const [leaving, setLeaving] = useState(false)
+  const [switching, setSwitching] = useState(false)
+
+  async function loadMyGroups() {
+    const { data } = await supabase
+      .from('group_memberships')
+      .select('group_id, groups(id, name, invite_code)')
+      .eq('user_id', user.id)
+      .order('joined_at', { ascending: true })
+    setMyGroups((data ?? []).map((row) => row.groups).filter(Boolean))
+  }
 
   async function loadGroupData() {
     setLoading(true)
@@ -74,7 +85,10 @@ export default function GroupView() {
   }
 
   useEffect(() => {
-    if (profile?.group_id) loadGroupData()
+    if (profile?.group_id) {
+      loadGroupData()
+      loadMyGroups()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.group_id])
 
@@ -85,23 +99,29 @@ export default function GroupView() {
     setTimeout(() => setCopied(false), 2000)
   }
 
+  async function handleSwitchGroup(newGroupId) {
+    if (newGroupId === profile.group_id) return
+    setSwitching(true)
+    try {
+      const { error } = await switchActiveGroup(newGroupId)
+      if (error) throw error
+    } catch (err) {
+      alert(`Couldn't switch groups: ${err.message ?? err}`)
+    } finally {
+      setSwitching(false)
+    }
+  }
+
   async function handleLeaveGroup() {
     if (group?.invite_code === DEFAULT_INVITE_CODE) {
-      alert("You're already in the default group -- nowhere else to go yet. Create or join a group first!")
+      alert("This is the default group -- leave a group you've actually joined or created instead.")
       return
     }
-    if (!confirm(`Leave "${group?.name}"? You'll be moved back to the default group.`)) return
+    if (!confirm(`Leave "${group?.name}"? You'll stop seeing its feed and roasts.`)) return
 
     setLeaving(true)
     try {
-      const { data: defaultGroup, error: lookupError } = await supabase
-        .from('groups')
-        .select('id')
-        .eq('invite_code', DEFAULT_INVITE_CODE)
-        .single()
-      if (lookupError) throw lookupError
-
-      const { error } = await switchGroup(defaultGroup.id)
+      const { error } = await leaveGroup(profile.group_id)
       if (error) throw error
     } catch (err) {
       alert(`Couldn't leave group: ${err.message ?? err}`)
@@ -123,7 +143,27 @@ export default function GroupView() {
       <p className="text-blue-400 text-sm tracking-widest font-body font-semibold mt-4 mb-2">
         YOUR GROUP
       </p>
-      <h1 className="font-display text-4xl text-blue-400 mb-6">{group?.name ?? 'Unknown Group'}</h1>
+      {myGroups.length > 1 ? (
+        <div className="relative mb-6">
+          <select
+            value={profile.group_id}
+            onChange={(e) => handleSwitchGroup(e.target.value)}
+            disabled={switching}
+            className="w-full bg-transparent font-display text-4xl text-blue-400 outline-none border-none appearance-none cursor-pointer pr-8"
+          >
+            {myGroups.map((g) => (
+              <option key={g.id} value={g.id} className="bg-[#0F0F0F] text-white font-body text-base">
+                {g.name}
+              </option>
+            ))}
+          </select>
+          <span className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-blue-400 text-xl">
+            ▾
+          </span>
+        </div>
+      ) : (
+        <h1 className="font-display text-4xl text-blue-400 mb-6">{group?.name ?? 'Unknown Group'}</h1>
+      )}
 
       <p className="font-display text-2xl text-blue-400 mb-4">Group Stats</p>
       <div className="grid grid-cols-3 gap-3 mb-6">

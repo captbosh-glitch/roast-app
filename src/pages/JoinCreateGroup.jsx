@@ -14,7 +14,7 @@ function randomInviteCode() {
 }
 
 export default function JoinCreateGroup() {
-  const { user, switchGroup } = useAuth()
+  const { user, joinGroup } = useAuth()
   const navigate = useNavigate()
 
   const [joinCode, setJoinCode] = useState('')
@@ -59,7 +59,7 @@ export default function JoinCreateGroup() {
         return
       }
 
-      const { error: updateError } = await switchGroup(targetGroup.id)
+      const { error: updateError } = await joinGroup(targetGroup.id)
       if (updateError) throw updateError
 
       navigate('/group')
@@ -94,7 +94,7 @@ export default function JoinCreateGroup() {
       }
       if (!newGroup) throw lastError
 
-      const { error: updateError } = await switchGroup(newGroup.id)
+      const { error: updateError } = await joinGroup(newGroup.id)
       if (updateError) throw updateError
 
       navigate('/group')
